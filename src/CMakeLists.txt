@@ -1,0 +1,10 @@
+if(WIN32)
+    add_library(sockets sockets/Socket_win32.cc)
+elseif(UNIX)
+    add_library(sockets sockets/Socket_unix.cc)
+else()
+    message(FATAL_ERROR "Unsupported platform ${CMAKE_SYSTEM_NAME}")
+endif()
+
+add_executable(main main.cc)
+target_link_libraries(main sockets)
