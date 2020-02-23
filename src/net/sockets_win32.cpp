@@ -3,7 +3,7 @@
 #pragma comment(lib, "Ws2_32.lib")
 
 namespace net {
-void SocketException::throwFromFailure(int result, const char *tag) {
+void SocketException::throwFromFailure(result_t result, const char *tag) {
   char *wsa_message;
   FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
                 FORMAT_MESSAGE_IGNORE_INSERTS,
@@ -15,46 +15,20 @@ void SocketException::throwFromFailure(int result, const char *tag) {
   throw SocketException("%s: %s", result, tag, message);
 }
 
-ssize_t Socket::recv(void *buf, size_t len, int flags) {
-  auto result =
-    ::recv(this->handle_, static_cast<char *>(buf), len, flags);
-  if (result < 0) {
-    SocketException::throwFromFailure(result, "RECVFROM");
-  }
-  return result;
-}
-
-ssize_t Socket::recvfrom(void *buf, size_t len, int flags,
-                         SocketAddress &address) {
-  auto result = ::recvfrom(this->handle_, static_cast<char *>(buf), len,
-                           flags, &address.ai_addr, &address.ai_addrlen);
-  if (result < 0) {
-    SocketException::throwFromFailure(result, "RECVFROM");
-  }
-  return result;
-}
-
-ssize_t Socket::send(const void *buf, size_t len, int flags) {
-  auto result =
-    ::send(this->handle_, static_cast<const char *>(buf), len, flags);
-  if (result < 0) {
-    SocketException::throwFromFailure(result, "SEND");
-  }
-  return result;
-}
-
-ssize_t Socket::sendto(const void *buf, size_t len, int flags,
-                       const SocketAddress &address) {
-  auto result = ::sendto(this->handle_, static_cast<const char *>(buf), len,
-                         flags, &address.ai_addr, address.ai_addrlen);
-  if (result < 0) {
-    SocketException::throwFromFailure(result, "SENDTO");
-  }
-  return result;
-}
-
 void Socket::close() {
   ::closesocket(this->handle_);
   this->handle_ = INVALID_SOCKET_HANDLE;
+}
+
+WSADATA wsadata;
+
+SocketInitializer::SocketInitializer() {
+  if (WSAStartup(MAKEWORD(2, 2), &wsadata) == SOCKET_ERROR) {
+    throw std::exception();
+  }
+}
+
+SocketInitializer::~SocketInitializer() {
+  WSACleanup();
 }
 } // namespace net

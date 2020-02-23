@@ -1,12 +1,9 @@
-#ifndef SOCKETS_H
-#define SOCKETS_H
+#ifndef NET_SOCKETS_H
+#define NET_SOCKETS_H
 
 #if defined(_WIN32)
-/// Not defined on Win32.
 #include <winsock2.h>
 #include <ws2tcpip.h>
-typedef long int ssize_t;
-#define EAI_OVERFLOW ERROR_INSUFFICIENT_BUFFER
 
 #else
 #include <cstdlib>
@@ -22,6 +19,21 @@ typedef long int ssize_t;
 #include <stdexcept>
 
 namespace net {
+#if defined(_WIN32)
+/// Not defined on Win32.
+#define EAI_OVERFLOW ERROR_INSUFFICIENT_BUFFER
+/// Common type for the actual socket.
+typedef SOCKET socket_handle_t;
+/// Common value for an invalid socket.
+const socket_handle_t INVALID_SOCKET_HANDLE = INVALID_SOCKET;
+typedef long int result_t;
+#else
+/// Common type for the actual socket.
+typedef int socket_handle_t;
+/// Common value for an invalid socket.
+const socket_handle_t INVALID_SOCKET_HANDLE = -1;
+typedef ssize_t result_t;
+#endif
 
 /**
  * Base exception type for socket operations.
@@ -29,7 +41,7 @@ namespace net {
 class SocketException : public std::exception {
 protected:
   std::string message;
-  int result;
+  result_t result;
 
 public:
   /**
@@ -37,7 +49,7 @@ public:
    * @param message
    * @param result The return code of the function that failed
    */
-  SocketException(const char *message, int result = 0) {
+  SocketException(const char *message, result_t result = 0) {
     this->message = message;
     this->result = result;
   }
@@ -47,7 +59,7 @@ public:
    * @param text
    * @param result The return code of the function that failed
    */
-  SocketException(const std::string &message, int result = 0) {
+  SocketException(const std::string &message, result_t result = 0) {
     this->message = message;
     this->result = result;
   }
@@ -58,7 +70,7 @@ public:
    * @param tag An indicator for the failing function
    * @throw SocketException
    */
-  static void throwFromFailure(int result, const char *tag);
+  static void throwFromFailure(result_t result, const char *tag);
 
   /**
    * Creates an instance using printf-style formatting.
@@ -70,7 +82,7 @@ public:
    * @see ::printf
    */
   template<typename ... Args>
-  explicit SocketException(const std::string &format, int result = 0, Args ... args) {
+  explicit SocketException(const std::string &format, result_t result = 0, Args ... args) {
     this->result = result;
     size_t size = static_cast<size_t>(snprintf(nullptr, 0, format.c_str(), args ...) + 1);
     if (size <= 0) {
@@ -85,22 +97,10 @@ public:
     return this->message.c_str();
   }
 
-  int getResult() {
+  result_t getResult() {
     return this->result;
   }
 };
-
-#if defined(_WIN32)
-/// Common type for the actual socket.
-typedef SOCKET socket_handle_t;
-/// Common value for an invalid socket.
-const socket_handle_t INVALID_SOCKET_HANDLE = INVALID_SOCKET;
-#else
-/// Common type for the actual socket.
-typedef int socket_handle_t;
-/// Common value for an invalid socket.
-const socket_handle_t INVALID_SOCKET_HANDLE = -1;
-#endif
 
 /**
  * Replacement of struct addrinfo which holds its own copy of the values. This
@@ -145,7 +145,8 @@ struct SocketAddress {
 
   std::string getHost(int flags = 0) const {
     char *buf = nullptr;
-    socklen_t buf_len = 20;
+    // Cannot use size_t on Linux.
+    unsigned int buf_len = 20;
     buf = static_cast<char *>(malloc(buf_len * sizeof(char)));
     if (buf == nullptr) {
       throw std::bad_alloc();
@@ -170,7 +171,8 @@ struct SocketAddress {
 
   std::string getService(int flags = 0) const {
     char *buf = nullptr;
-    socklen_t buf_len = 20;
+    // Cannot use size_t on Linux.
+    unsigned int buf_len = 20;
     buf = static_cast<char *>(malloc(buf_len * sizeof(char)));
     if (buf == nullptr) {
       throw std::bad_alloc();
@@ -277,14 +279,9 @@ public:
     return *this;
   }
 
-  bool operator==(Socket &socket) const {
-    return this->handle_ == socket.handle_;
-  }
-
-  bool operator==(const Socket &socket) const {
-    return this->handle_ == socket.handle_;
-  }
-
+  /**
+   * @return The address associated with the socket
+   */
   const SocketAddress &getAddress() const {
     return this->address_;
   }
@@ -298,13 +295,76 @@ public:
   }
 
   /**
+   * Retrieves a socket option.
+   * @tparam T The type of the option
+   * @param level The level at which the option is defined
+   * @param option_name The socket option for which the value is to be returned
+   * @return The value of the socket option
+   * @throw SocketException Thrown if the operation failed
+   * @see ::getsockopt
+   */
+  template<typename T>
+  const T *getsockopt(int level, int option_name) const {
+    auto option_value = new T;
+    auto option_len = sizeof(T);
+    // Option value reinterpreted for WinSock.
+    result_t result = ::getsockopt(this->handle_, level, option_name,
+                                   reinterpret_cast<char *>(option_value),
+                                   reinterpret_cast<socklen_t *>(&option_len));
+    if (result != 0) {
+      SocketException::throwFromFailure(result, "GETSOCKOPT");
+    }
+    return option_value;
+  }
+
+  /**
+   * Sets a socket option.
+   * @tparam T The type of the option
+   * @param level The level at which the option is defined
+   * @param option_name The socket option for which the value is to be set
+   * @param option_value A pointer to the value for the requested option
+   * @throw SocketException Thrown if the operation failed
+   * @see ::setsockopt
+   */
+  template<typename T>
+  void setsockopt(int level, int option_name, T *option_value) {
+    auto option_len = sizeof(T);
+    // Option value reinterpreted for WinSock.
+    result_t result = ::setsockopt(this->handle_, level, option_name,
+                                   reinterpret_cast<char *>(option_value), option_len);
+    if (result != 0) {
+      SocketException::throwFromFailure(result, "SETSOCKOPT");
+    }
+  }
+
+  /**
+   * Sets a socket option.
+   * @tparam T The type of the option
+   * @param level The level at which the option is defined
+   * @param option_name The socket option for which the value is to be set
+   * @param option_value The value for the requested option
+   * @throw SocketException Thrown if the operation failed
+   * @see ::setsockopt
+   */
+  template<typename T>
+  void setsockopt(int level, int option_name, T option_value) {
+    auto option_len = sizeof(T);
+    // Option value reinterpreted for WinSock.
+    result_t result = ::setsockopt(this->handle_, level, option_name,
+                                   reinterpret_cast<char *>(&option_value), option_len);
+    if (result != 0) {
+      SocketException::throwFromFailure(result, "SETSOCKOPT");
+    }
+  }
+
+  /**
    * Binds the socket handler to the configured address.
    * @throw SocketException Thrown if the binding failed
    * @see ::bind
    */
   void bind() {
-    int result = ::bind(this->handle_, &this->address_.ai_addr,
-                        this->address_.ai_addrlen);
+    result_t result = ::bind(this->handle_, &this->address_.ai_addr,
+                             this->address_.ai_addrlen);
     if (result != 0) {
       SocketException::throwFromFailure(result, "BIND");
     }
@@ -316,8 +376,8 @@ public:
    * @see ::connect
    */
   void connect() {
-    int result = ::connect(this->handle_, &this->address_.ai_addr,
-                           this->address_.ai_addrlen);
+    result_t result = ::connect(this->handle_, &this->address_.ai_addr,
+                                this->address_.ai_addrlen);
     if (result != 0) {
       SocketException::throwFromFailure(result, "CONNECT");
     }
@@ -330,7 +390,7 @@ public:
    * @see ::listen
    */
   void listen(int max = SOMAXCONN) {
-    int result = ::listen(this->handle_, max);
+    result_t result = ::listen(this->handle_, max);
     if (result != 0) {
       SocketException::throwFromFailure(result, "LISTEN");
     }
@@ -346,12 +406,12 @@ public:
     socklen_t client_sock_address_len = sizeof(sockaddr_storage);
     auto client_sock_address =
       reinterpret_cast<sockaddr *>(new sockaddr_storage);
-    memset(client_sock_address, 0, client_sock_address_len);
+    memset(client_sock_address, 0, static_cast<size_t>(client_sock_address_len));
 
     socket_handle_t client_socket =
       ::accept(this->handle_, client_sock_address, &client_sock_address_len);
     if (client_socket == INVALID_SOCKET_HANDLE) {
-      SocketException::throwFromFailure(client_socket, "ACCEPT");
+      SocketException::throwFromFailure(static_cast<result_t>(client_socket), "ACCEPT");
     }
     auto socket_address =
       SocketAddress(client_sock_address, client_sock_address_len);
@@ -381,7 +441,14 @@ public:
    * @throw SocketException
    * @see ::recv
    */
-  ssize_t recv(void *buf, size_t len, int flags = 0);
+  result_t recv(char *buf, size_t len, int flags = 0) {
+    result_t result = ::recv(this->handle_, buf, len, flags);
+    if (result < 0) {
+      SocketException::throwFromFailure(result, "RECVFROM");
+    }
+    return result;
+  }
+
   /**
    *
    * @param buf
@@ -392,7 +459,15 @@ public:
    * @throw SocketException
    * @see ::recvfrom
    */
-  ssize_t recvfrom(void *buf, size_t len, int flags, SocketAddress &address);
+  result_t recvfrom(char *buf, size_t len, int flags, SocketAddress &address) {
+    result_t result = ::recvfrom(this->handle_, buf, len, flags, &address.ai_addr,
+                                 &address.ai_addrlen);
+    if (result < 0) {
+      SocketException::throwFromFailure(result, "RECVFROM");
+    }
+    return result;
+  }
+
   /**
    *
    * @param buf
@@ -402,7 +477,14 @@ public:
    * @throw SocketException
    * @see ::send
    */
-  ssize_t send(const void *buf, size_t len, int flags = 0);
+  result_t send(const char *buf, size_t len, int flags = 0) {
+    result_t result = ::send(this->handle_, buf, len, flags);
+    if (result < 0) {
+      SocketException::throwFromFailure(result, "SEND");
+    }
+    return result;
+  }
+
   /**
    *
    * @param buf
@@ -413,8 +495,15 @@ public:
    * @throw SocketException
    * @see ::sendto
    */
-  ssize_t sendto(const void *buf, size_t len, int flags,
-                 const SocketAddress &address);
+  result_t sendto(const char *buf, size_t len, int flags,
+                  const SocketAddress &address) {
+    result_t result = ::sendto(this->handle_, buf, len, flags, &address.ai_addr,
+                               address.ai_addrlen);
+    if (result < 0) {
+      SocketException::throwFromFailure(result, "SENDTO");
+    }
+    return result;
+  }
 
   /**
    *
@@ -423,7 +512,7 @@ public:
    * @see ::shutdown
    */
   void shutdown(int how) {
-    int result = ::shutdown(this->handle_, how);
+    result_t result = ::shutdown(this->handle_, how);
     if (result != 0) {
       SocketException::throwFromFailure(result, "SHUTDOWN");
     }
@@ -441,27 +530,29 @@ protected:
   static addrinfo *getAddrinfo(int ai_family, int ai_socktype, int ai_protocol, int ai_flags,
                                const char *name,
                                const char *service) {
-    addrinfo hints{}, *result = nullptr;
+    addrinfo hints{}, *info = nullptr;
     memset(&hints, 0, sizeof(addrinfo));
     hints.ai_family = ai_family;
     hints.ai_socktype = ai_socktype;
     hints.ai_protocol = ai_protocol;
     hints.ai_flags = ai_flags;
-    int code = getaddrinfo(name, service, &hints, &result) != 0;
-    if (code != 0) {
-      throw SocketException("Cannot get address info: %s", code, gai_strerror(code));
+    result_t result = getaddrinfo(name, service, &hints, &info) != 0;
+    if (result != 0) {
+      throw SocketException("Cannot get address info: %s", result,
+                            gai_strerror(static_cast<int>(result)));
     }
-    return result;
+    return info;
   }
 
 public:
   static Socket *boundSocket(int ai_family, int ai_socktype, int ai_protocol, const char *name,
                              const char *service) {
-    auto result = SocketFactory::getAddrinfo(ai_family, ai_socktype, ai_protocol, AI_PASSIVE, name, service);
+    auto info = SocketFactory::getAddrinfo(ai_family, ai_socktype, ai_protocol, AI_PASSIVE, name,
+                                           service);
 
     Socket *sock = nullptr;
     SocketException *error = nullptr;
-    for (addrinfo *addr = result; addr != nullptr; addr = addr->ai_next) {
+    for (auto addr = info; addr != nullptr; addr = addr->ai_next) {
       try {
         sock = new Socket(addr);
         sock->bind();
@@ -473,27 +564,28 @@ public:
       }
       break;
     }
-    freeaddrinfo(result);
+    freeaddrinfo(info);
     if (sock == nullptr) {
       std::string message;
-      int code = 0;
+      result_t result = 0;
       if (error != nullptr) {
         message += ": ";
         message += error->what();
-        code = error->getResult();
+        result = error->getResult();
       }
-      throw SocketException("Cannot create bound socket%s", code, message.c_str());
+      throw SocketException("Cannot create bound socket%s", result, message.c_str());
     }
     return sock;
   }
 
   static Socket *connectedSocket(int ai_socktype, int ai_protocol, const char *name,
                                  const char *service) {
-    auto result = SocketFactory::getAddrinfo(AF_UNSPEC, ai_socktype, ai_protocol, AI_PASSIVE, name, service);
+    auto info = SocketFactory::getAddrinfo(AF_UNSPEC, ai_socktype, ai_protocol, AI_PASSIVE, name,
+                                           service);
 
     Socket *sock = nullptr;
     SocketException *error = nullptr;
-    for (addrinfo *addr = result; addr != nullptr; addr = addr->ai_next) {
+    for (auto addr = info; addr != nullptr; addr = addr->ai_next) {
       try {
         sock = new Socket(addr);
         sock->connect();
@@ -505,41 +597,26 @@ public:
       }
       break;
     }
-    freeaddrinfo(result);
+    freeaddrinfo(info);
     if (sock == nullptr) {
       std::string message;
-      int code = 0;
+      result_t result = 0;
       if (error != nullptr) {
         message += ": ";
         message += error->what();
-        code = error->getResult();
+        result = error->getResult();
       }
-      throw SocketException("Cannot create connected socket%s", code, message.c_str());
+      throw SocketException("Cannot create connected socket%s", result, message.c_str());
     }
     return sock;
   }
 };
 
 class SocketInitializer {
-#if defined(_WIN32)
-  WSADATA wsadata{};
-#endif
 public:
-  SocketInitializer() {
-#if defined(_WIN32)
-    if (WSAStartup(MAKEWORD(2, 2), &wsadata) == SOCKET_ERROR) {
-      throw std::exception();
-    }
-#endif
-  }
-
-  ~SocketInitializer() {
-#if defined(_WIN32)
-    WSACleanup();
-#endif
-  }
+  SocketInitializer();
+  ~SocketInitializer();
 };
-
 } // namespace net
 
-#endif // SOCKETS_H
+#endif // NET_SOCKETS_H
