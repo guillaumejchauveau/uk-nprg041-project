@@ -5,6 +5,13 @@
 #include <locale>
 #include <sstream>
 
+#if defined(_WIN32)
+/// Not defined on Win32.
+#ifndef EAI_OVERFLOW
+#define EAI_OVERFLOW ERROR_INSUFFICIENT_BUFFER
+#endif
+#endif
+
 namespace utils {
 class wchar {
 public:

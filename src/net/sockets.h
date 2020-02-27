@@ -20,8 +20,6 @@
 
 namespace net {
 #if defined(_WIN32)
-/// Not defined on Win32.
-#define EAI_OVERFLOW ERROR_INSUFFICIENT_BUFFER
 /// Common type for the actual socket.
 typedef SOCKET socket_handle_t;
 /// Common value for an invalid socket.
@@ -32,7 +30,6 @@ typedef int socket_handle_t;
 /// Common value for an invalid socket.
 const socket_handle_t INVALID_SOCKET_HANDLE = -1;
 #endif
-using utils::result_t;
 
 /**
  * Replacement of struct addrinfo which holds its own copy of the values. This
@@ -79,14 +76,14 @@ struct SocketAddress {
     std::string host;
     host.resize(20);
 
-    int result;
-    while ((result = getnameinfo(&this->ai_addr, this->ai_addrlen, &host.front(),
-                                 static_cast<unsigned int>(host.size()), nullptr, 0,
-                                 flags))) {
-      if (result == EAI_OVERFLOW) {
+    int code;
+    while ((code = getnameinfo(&this->ai_addr, this->ai_addrlen, &host.front(),
+                               static_cast<unsigned int>(host.size()), nullptr, 0,
+                               flags))) {
+      if (code == EAI_OVERFLOW) {
         host.resize(host.size() * 2);
       } else {
-        throw utils::AddressInfoException(result);
+        throw utils::AddressInfoException(code);
       }
     }
     host.resize(host.find(static_cast<char>(0)));
@@ -97,14 +94,14 @@ struct SocketAddress {
     std::string service;
     service.resize(20);
 
-    result_t result;
-    while ((result = getnameinfo(&this->ai_addr, this->ai_addrlen, nullptr, 0, &service.front(),
-                                 static_cast<unsigned int>(service.size()),
-                                 flags))) {
-      if (result == EAI_OVERFLOW) {
+    int code;
+    while ((code = getnameinfo(&this->ai_addr, this->ai_addrlen, nullptr, 0, &service.front(),
+                               static_cast<unsigned int>(service.size()),
+                               flags))) {
+      if (code == EAI_OVERFLOW) {
         service.resize(service.size() * 2);
       } else {
-        throw utils::AddressInfoException(result);
+        throw utils::AddressInfoException(code);
       }
     }
     service.resize(service.find(static_cast<char>(0)));
@@ -120,8 +117,18 @@ struct SocketAddress {
  * Wrapper for BSD sockets on Unix and Windows systems.
  */
 class Socket {
+protected:
   socket_handle_t handle_;
   std::unique_ptr<SocketAddress> address_;
+
+  void checkState() const {
+    if (this->isInvalid()) {
+      throw std::runtime_error("Invalid socket state");
+    }
+  }
+
+  static bool isCodeEWouldBlock(long int code);
+  static bool isCodeEInProgress(long int code);
 
 public:
   /**
@@ -190,6 +197,10 @@ public:
     return this->address_;
   }
 
+  socket_handle_t getHandle() const {
+    return this->handle_;
+  }
+
   /**
    * Tests if the socket is invalid.
    * @return The result of the test
@@ -209,14 +220,14 @@ public:
    */
   template<typename T>
   std::unique_ptr<T> getsockopt(int level, int option_name) const {
+    this->checkState();
     auto option_value = new T;
     auto option_len = sizeof(T);
     // Option value reinterpreted for WinSock.
-    result_t result = ::getsockopt(this->handle_, level, option_name,
-                                   reinterpret_cast<char *>(option_value),
-                                   reinterpret_cast<socklen_t *>(&option_len));
-    if (result != 0) {
-      throw utils::Exception::from_last_failure();
+    if ((::getsockopt(this->handle_, level, option_name,
+                      reinterpret_cast<char *>(option_value),
+                      reinterpret_cast<socklen_t *>(&option_len))) != 0) {
+      throw utils::Exception::fromLastFailure();
     }
     return std::unique_ptr<T>(option_value);
   }
@@ -232,12 +243,12 @@ public:
    */
   template<typename T>
   void setsockopt(int level, int option_name, T *option_value) {
+    this->checkState();
     auto option_len = sizeof(T);
     // Option value reinterpreted for WinSock.
-    result_t result = ::setsockopt(this->handle_, level, option_name,
-                                   reinterpret_cast<char *>(option_value), option_len);
-    if (result != 0) {
-      throw utils::Exception::from_last_failure();
+    if ((::setsockopt(this->handle_, level, option_name,
+                      reinterpret_cast<char *>(option_value), option_len)) != 0) {
+      throw utils::Exception::fromLastFailure();
     }
   }
 
@@ -252,12 +263,12 @@ public:
    */
   template<typename T>
   void setsockopt(int level, int option_name, T option_value) {
+    this->checkState();
     auto option_len = sizeof(T);
     // Option value reinterpreted for WinSock.
-    result_t result = ::setsockopt(this->handle_, level, option_name,
-                                   reinterpret_cast<char *>(&option_value), option_len);
-    if (result != 0) {
-      throw utils::Exception::from_last_failure();
+    if ((::setsockopt(this->handle_, level, option_name,
+                      reinterpret_cast<char *>(&option_value), option_len)) != 0) {
+      throw utils::Exception::fromLastFailure();
     }
   }
 
@@ -267,10 +278,10 @@ public:
    * @see ::bind
    */
   void bind() {
-    result_t result = ::bind(this->handle_, &this->address_->ai_addr,
-                             this->address_->ai_addrlen);
-    if (result != 0) {
-      throw utils::Exception::from_last_failure();
+    this->checkState();
+    if ((::bind(this->handle_, &this->address_->ai_addr,
+                this->address_->ai_addrlen)) != 0) {
+      throw utils::Exception::fromLastFailure();
     }
   }
 
@@ -280,10 +291,14 @@ public:
    * @see ::connect
    */
   void connect() {
-    result_t result = ::connect(this->handle_, &this->address_->ai_addr,
-                                this->address_->ai_addrlen);
-    if (result != 0) {
-      throw utils::Exception::from_last_failure();
+    this->checkState();
+    if ((::connect(this->handle_, &this->address_->ai_addr,
+                   this->address_->ai_addrlen)) != 0) {
+      auto error = utils::Exception::getLastFailureCode();
+      if (isCodeEInProgress(error)) {
+        return;
+      }
+      throw utils::Exception(error);
     }
   }
 
@@ -294,9 +309,9 @@ public:
    * @see ::listen
    */
   void listen(int max = SOMAXCONN) {
-    result_t result = ::listen(this->handle_, max);
-    if (result != 0) {
-      throw utils::Exception::from_last_failure();
+    this->checkState();
+    if ((::listen(this->handle_, max)) != 0) {
+      throw utils::Exception::fromLastFailure();
     }
   }
 
@@ -307,6 +322,7 @@ public:
    * @see ::accept
    */
   std::unique_ptr<Socket> accept() {
+    this->checkState();
     socklen_t client_sock_address_len = sizeof(sockaddr_storage);
     auto client_sock_address =
       reinterpret_cast<sockaddr *>(new sockaddr_storage);
@@ -315,7 +331,11 @@ public:
     socket_handle_t client_socket =
       ::accept(this->handle_, client_sock_address, &client_sock_address_len);
     if (client_socket == INVALID_SOCKET_HANDLE) {
-      throw utils::Exception::from_last_failure();
+      auto error = utils::Exception::getLastFailureCode();
+      if (isCodeEWouldBlock(error)) {
+        return nullptr;
+      }
+      throw utils::Exception(error);
     }
     auto socket_address = std::make_unique<SocketAddress>(client_sock_address,
                                                           client_sock_address_len);
@@ -332,12 +352,17 @@ public:
    * @throw utils::Exception
    * @see ::recv
    */
-  result_t recv(char *buf, size_t len, int flags = 0) {
-    result_t result = ::recv(this->handle_, buf, len, flags);
-    if (result < 0) {
-      throw utils::Exception::from_last_failure();
+  long int recv(char *buf, size_t len, int flags = 0) {
+    this->checkState();
+    auto count = ::recv(this->handle_, buf, len, flags);
+    if (count < 0) {
+      auto error = utils::Exception::getLastFailureCode();
+      if (isCodeEWouldBlock(error)) {
+        return -1;
+      }
+      throw utils::Exception(error);
     }
-    return result;
+    return count;
   }
 
   /**
@@ -350,13 +375,18 @@ public:
    * @throw utils::Exception
    * @see ::recvfrom
    */
-  result_t recvfrom(char *buf, size_t len, int flags, SocketAddress &address) {
-    result_t result = ::recvfrom(this->handle_, buf, len, flags, &address.ai_addr,
-                                 &address.ai_addrlen);
-    if (result < 0) {
-      throw utils::Exception::from_last_failure();
+  long int recvfrom(char *buf, size_t len, int flags, SocketAddress &address) {
+    this->checkState();
+    auto count = ::recvfrom(this->handle_, buf, len, flags, &address.ai_addr,
+                            &address.ai_addrlen);
+    if (count < 0) {
+      auto error = utils::Exception::getLastFailureCode();
+      if (isCodeEWouldBlock(error)) {
+        return -1;
+      }
+      throw utils::Exception(error);
     }
-    return result;
+    return count;
   }
 
   /**
@@ -368,12 +398,17 @@ public:
    * @throw utils::Exception
    * @see ::send
    */
-  result_t send(const char *buf, size_t len, int flags = 0) {
-    result_t result = ::send(this->handle_, buf, len, flags);
-    if (result < 0) {
-      throw utils::Exception::from_last_failure();
+  long int send(const char *buf, size_t len, int flags = 0) {
+    this->checkState();
+    auto count = ::send(this->handle_, buf, len, flags);
+    if (count < 0) {
+      auto error = utils::Exception::getLastFailureCode();
+      if (isCodeEWouldBlock(error)) {
+        return -1;
+      }
+      throw utils::Exception(error);
     }
-    return result;
+    return count;
   }
 
   /**
@@ -386,14 +421,19 @@ public:
    * @throw utils::Exception
    * @see ::sendto
    */
-  result_t sendto(const char *buf, size_t len, int flags,
+  long int sendto(const char *buf, size_t len, int flags,
                   const SocketAddress &address) {
-    result_t result = ::sendto(this->handle_, buf, len, flags, &address.ai_addr,
-                               address.ai_addrlen);
-    if (result < 0) {
-      throw utils::Exception::from_last_failure();
+    this->checkState();
+    auto count = ::sendto(this->handle_, buf, len, flags, &address.ai_addr,
+                          address.ai_addrlen);
+    if (count < 0) {
+      auto error = utils::Exception::getLastFailureCode();
+      if (isCodeEWouldBlock(error)) {
+        return -1;
+      }
+      throw utils::Exception(error);
     }
-    return result;
+    return count;
   }
 
   /**
@@ -403,9 +443,9 @@ public:
    * @see ::shutdown
    */
   void shutdown(int how) {
-    result_t result = ::shutdown(this->handle_, how);
-    if (result != 0) {
-      throw utils::Exception::from_last_failure();
+    this->checkState();
+    if ((::shutdown(this->handle_, how)) != 0) {
+      throw utils::Exception::fromLastFailure();
     }
   }
 
@@ -427,9 +467,9 @@ protected:
     hints.ai_socktype = ai_socktype;
     hints.ai_protocol = ai_protocol;
     hints.ai_flags = ai_flags;
-    result_t result = getaddrinfo(name, service, &hints, &info) != 0;
-    if (result != 0) {
-      throw utils::AddressInfoException(result);
+    auto code = getaddrinfo(name, service, &hints, &info) != 0;
+    if (code != 0) {
+      throw utils::AddressInfoException(code);
     }
     return info;
   }

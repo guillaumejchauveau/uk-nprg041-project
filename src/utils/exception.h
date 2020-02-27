@@ -10,46 +10,40 @@
 
 namespace utils {
 #if defined(_WIN32)
-typedef long int result_t;
 struct LocalFreeHelper {
   void operator()(void *toFree) {
     ::LocalFree(reinterpret_cast<HLOCAL>(toFree));
   };
 };
 #else
-typedef ssize_t result_t;
 #endif
 
 class Exception : public std::exception {
 protected:
-  result_t result;
+  long int code;
 
 public:
   /**
-   * @param result The return code of the function that failed
+   * @param code The return code of the function that failed
    */
-  explicit Exception(result_t result) : exception() {
-    this->result = result;
+  explicit Exception(long int code) : exception() {
+    this->code = code;
   }
 
-  /**
-   * @param result The return code of the function that failed
-   */
-  static Exception from_failure(result_t result) {
-    return Exception(result);
-  }
-
-  static Exception from_last_failure() {
+  static long int getLastFailureCode() {
 #if defined(_WIN32)
-    auto result = ::GetLastError();
+    return ::GetLastError();
 #else
-    auto result = errno;
+    return errno;
 #endif
-    return Exception::from_failure(result);
   }
 
-  result_t getResult() const {
-    return this->result;
+  static Exception fromLastFailure() {
+    return Exception(Exception::getLastFailureCode());
+  }
+
+  long int getResult() const {
+    return this->code;
   }
 
   virtual std::string getMessage() const {
@@ -83,10 +77,10 @@ public:
 
 class AddressInfoException : public Exception {
 public:
-  explicit AddressInfoException(result_t result) : Exception(result) {
+  explicit AddressInfoException(int result) : Exception(result) {
   }
 
-#if !defined(_WIN32)
+#if !defined(_WIN32) // Unix only
 
   std::string getMessage() const override {
     // gai_strerror is not thread safe.
@@ -117,7 +111,7 @@ public:
    */
   template<typename ... Args>
   explicit MessageException(const std::string &format, Args ... args) {
-    auto size = static_cast<size_t>(snprintf(nullptr, 0, format.c_str(), args ...) + 1);
+    auto size = static_cast<size_t>(snprintf(nullptr, 0, format.c_str(), args ...)) + 1;
     if (size <= 0) {
       throw std::runtime_error("Error during formatting.");
     }
