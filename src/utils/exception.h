@@ -1,6 +1,7 @@
 #ifndef UTILS_EXCEPTION_H
 #define UTILS_EXCEPTION_H
 
+#include "utils.h"
 #include <exception>
 #include <stdexcept>
 #include <cerrno>
@@ -38,9 +39,6 @@ public:
     return Exception(result);
   }
 
-  /**
-   * @param result The return code of the function that failed
-   */
   static Exception from_last_failure() {
 #if defined(_WIN32)
     auto result = ::GetLastError();
@@ -56,7 +54,7 @@ public:
 
   virtual std::string getMessage() const {
 #if defined(_WIN32)
-    std::unique_ptr<char[], LocalFreeHelper> buff;
+    std::unique_ptr<wchar_t[], LocalFreeHelper> buff;
     LPWSTR buffPtr;
     FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
                   FORMAT_MESSAGE_IGNORE_INSERTS,
@@ -64,7 +62,7 @@ public:
                   MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
                   reinterpret_cast<LPSTR>(&buffPtr), 0, nullptr);
     buff.reset(buffPtr);
-    return buff.get();
+    return utils::wchar::narrow(buff.get());
 #else
     std::string buff;
     buff.resize(64);

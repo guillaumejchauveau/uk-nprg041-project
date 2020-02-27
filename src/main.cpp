@@ -6,11 +6,11 @@ int main() {
 
   auto sock = net::SocketFactory::boundSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, "8081");
   sock->listen();
-  std::cout << "Server started on " << (std::string) *sock->getAddress() << std::endl;
+  std::cout << "Server started on " << static_cast<std::string>(*sock->getAddress()) << std::endl;
   char buf[1000];
   while (auto client = sock->accept()) {
     memset(buf, 0, 1000);
-    std::cout << "New connection from " << (std::string) *client->getAddress() << std::endl;
+    std::cout << "New connection from " << static_cast<std::string>(*client->getAddress()) << std::endl;
     auto bytes_count = client->recv(buf, 999);
     std::cout << bytes_count << " bytes received" << std::endl;
     std::cout << buf << std::endl;

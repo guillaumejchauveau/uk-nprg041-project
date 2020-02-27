@@ -12,7 +12,7 @@ WSADATA wsadata;
 
 SocketInitializer::SocketInitializer() {
   if (WSAStartup(MAKEWORD(2, 2), &wsadata) == SOCKET_ERROR) {
-    throw std::exception();
+    throw utils::Exception::from_last_failure();
   }
 }
 

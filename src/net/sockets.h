@@ -81,7 +81,7 @@ struct SocketAddress {
 
     int result;
     while ((result = getnameinfo(&this->ai_addr, this->ai_addrlen, &host.front(),
-                                 static_cast<unsigned int>(host.size()), NULL, 0,
+                                 static_cast<unsigned int>(host.size()), nullptr, 0,
                                  flags))) {
       if (result == EAI_OVERFLOW) {
         host.resize(host.size() * 2);
@@ -89,7 +89,7 @@ struct SocketAddress {
         throw utils::AddressInfoException(result);
       }
     }
-    host.resize(host.find((char) 0));
+    host.resize(host.find(static_cast<char>(0)));
     return host;
   }
 
@@ -98,7 +98,7 @@ struct SocketAddress {
     service.resize(20);
 
     result_t result;
-    while ((result = getnameinfo(&this->ai_addr, this->ai_addrlen, NULL, 0, &service.front(),
+    while ((result = getnameinfo(&this->ai_addr, this->ai_addrlen, nullptr, 0, &service.front(),
                                  static_cast<unsigned int>(service.size()),
                                  flags))) {
       if (result == EAI_OVERFLOW) {
@@ -107,7 +107,7 @@ struct SocketAddress {
         throw utils::AddressInfoException(result);
       }
     }
-    service.resize(service.find((char) 0));
+    service.resize(service.find(static_cast<char>(0)));
     return service;
   }
 
@@ -208,7 +208,7 @@ public:
    * @see ::getsockopt
    */
   template<typename T>
-  const T *getsockopt(int level, int option_name) const {
+  std::unique_ptr<T> getsockopt(int level, int option_name) const {
     auto option_value = new T;
     auto option_len = sizeof(T);
     // Option value reinterpreted for WinSock.
@@ -218,7 +218,7 @@ public:
     if (result != 0) {
       throw utils::Exception::from_last_failure();
     }
-    return option_value;
+    return std::unique_ptr<T>(option_value);
   }
 
   /**
@@ -442,14 +442,14 @@ public:
                                            service);
 
     std::unique_ptr<Socket> sock;
-    utils::Exception *error = nullptr;
+    std::unique_ptr<utils::Exception> error;
     for (auto addr = info; addr != nullptr; addr = addr->ai_next) {
       auto address = std::make_unique<SocketAddress>(addr);
       try {
         sock = std::make_unique<Socket>(std::move(address));
         sock->bind();
       } catch (utils::Exception &e) {
-        error = &e;
+        error = std::make_unique<utils::Exception>(std::move(e));
         sock.reset();
         continue;
       }
@@ -458,8 +458,8 @@ public:
     freeaddrinfo(info);
     if (!sock) {
       std::string message = "Unknown error";
-      if (error != nullptr) {
-        message = std::move(error->getMessage());
+      if (error) {
+        message = error->getMessage();
       }
       throw utils::MessageException("Cannot create bound socket: %s", message.c_str());
     }
@@ -472,14 +472,14 @@ public:
                                            service);
 
     std::unique_ptr<Socket> sock;
-    utils::Exception *error = nullptr;
+    std::unique_ptr<utils::Exception> error;
     for (auto addr = info; addr != nullptr; addr = addr->ai_next) {
       auto address = std::make_unique<SocketAddress>(addr);
       try {
         sock = std::make_unique<Socket>(std::move(address));
         sock->connect();
       } catch (utils::Exception &e) {
-        error = &e;
+        error = std::make_unique<utils::Exception>(std::move(e));
         sock.reset();
         continue;
       }
@@ -488,8 +488,8 @@ public:
     freeaddrinfo(info);
     if (!sock) {
       std::string message = "Unknown error";
-      if (error != nullptr) {
-        message = std::move(error->getMessage());
+      if (error) {
+        message = error->getMessage();
       }
       throw utils::MessageException("Cannot create connected socket: %s", message.c_str());
     }
