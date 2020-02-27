@@ -13,10 +13,10 @@
 
 #endif
 
-#include <exception>
+#include "../utils/exception.h"
 #include <string>
 #include <utility>
-#include <stdexcept>
+#include <memory>
 
 namespace net {
 #if defined(_WIN32)
@@ -26,81 +26,13 @@ namespace net {
 typedef SOCKET socket_handle_t;
 /// Common value for an invalid socket.
 const socket_handle_t INVALID_SOCKET_HANDLE = INVALID_SOCKET;
-typedef long int result_t;
 #else
 /// Common type for the actual socket.
 typedef int socket_handle_t;
 /// Common value for an invalid socket.
 const socket_handle_t INVALID_SOCKET_HANDLE = -1;
-typedef ssize_t result_t;
 #endif
-
-/**
- * Base exception type for socket operations.
- */
-class SocketException : public std::exception {
-protected:
-  std::string message;
-  result_t result;
-
-public:
-  /**
-   *
-   * @param message
-   * @param result The return code of the function that failed
-   */
-  SocketException(const char *message, result_t result = 0) {
-    this->message = message;
-    this->result = result;
-  }
-
-  /**
-   *
-   * @param text
-   * @param result The return code of the function that failed
-   */
-  SocketException(const std::string &message, result_t result = 0) {
-    this->message = message;
-    this->result = result;
-  }
-
-  /**
-   * Platform-specific function for error handling.
-   * @param result The return code of the function that failed
-   * @param tag An indicator for the failing function
-   * @throw SocketException
-   */
-  static void throwFromFailure(result_t result, const char *tag);
-
-  /**
-   * Creates an instance using printf-style formatting.
-   *
-   * @tparam Args Parameter pack type for the format arguments
-   * @param format The base format string
-   * @param result The return code of the function that failed
-   * @param args Additional arguments for formatting
-   * @see ::printf
-   */
-  template<typename ... Args>
-  explicit SocketException(const std::string &format, result_t result = 0, Args ... args) {
-    this->result = result;
-    size_t size = static_cast<size_t>(snprintf(nullptr, 0, format.c_str(), args ...) + 1);
-    if (size <= 0) {
-      throw std::runtime_error("Error during formatting.");
-    }
-    auto buf = new char[size];
-    snprintf(buf, size, format.c_str(), args ...);
-    this->message = buf;
-  }
-
-  const char *what() const noexcept override {
-    return this->message.c_str();
-  }
-
-  result_t getResult() {
-    return this->result;
-  }
-};
+using utils::result_t;
 
 /**
  * Replacement of struct addrinfo which holds its own copy of the values. This
@@ -144,55 +76,39 @@ struct SocketAddress {
   }
 
   std::string getHost(int flags = 0) const {
-    char *buf = nullptr;
-    // Cannot use size_t on Linux.
-    unsigned int buf_len = 20;
-    buf = static_cast<char *>(malloc(buf_len * sizeof(char)));
-    if (buf == nullptr) {
-      throw std::bad_alloc();
-    }
+    std::string host;
+    host.resize(20);
 
     int result;
-    while ((result = getnameinfo(&this->ai_addr, this->ai_addrlen, buf, buf_len, NULL, 0, flags))) {
+    while ((result = getnameinfo(&this->ai_addr, this->ai_addrlen, &host.front(),
+                                 static_cast<unsigned int>(host.size()), NULL, 0,
+                                 flags))) {
       if (result == EAI_OVERFLOW) {
-        buf_len *= 2;
-        buf = static_cast<char *>(realloc(buf, buf_len * sizeof(char)));
-        if (buf == nullptr) {
-          throw std::bad_alloc();
-        }
+        host.resize(host.size() * 2);
       } else {
-        throw SocketException("Cannot get name info: %s", 0, gai_strerror(result));
+        throw utils::AddressInfoException(result);
       }
     }
-    auto host = std::string(buf);
-    free(buf);
+    host.resize(host.find((char) 0));
     return host;
   }
 
   std::string getService(int flags = 0) const {
-    char *buf = nullptr;
-    // Cannot use size_t on Linux.
-    unsigned int buf_len = 20;
-    buf = static_cast<char *>(malloc(buf_len * sizeof(char)));
-    if (buf == nullptr) {
-      throw std::bad_alloc();
-    }
+    std::string service;
+    service.resize(20);
 
-    int result;
-    while ((result = getnameinfo(&this->ai_addr, this->ai_addrlen, NULL, 0, buf, buf_len, flags))) {
+    result_t result;
+    while ((result = getnameinfo(&this->ai_addr, this->ai_addrlen, NULL, 0, &service.front(),
+                                 static_cast<unsigned int>(service.size()),
+                                 flags))) {
       if (result == EAI_OVERFLOW) {
-        buf_len *= 2;
-        buf = static_cast<char *>(realloc(buf, buf_len * sizeof(char)));
-        if (buf == nullptr) {
-          throw std::bad_alloc();
-        }
+        service.resize(service.size() * 2);
       } else {
-        throw SocketException("Cannot get name info: %s", 0, gai_strerror(result));
+        throw utils::AddressInfoException(result);
       }
     }
-    auto host = std::string(buf);
-    free(buf);
-    return host;
+    service.resize(service.find((char) 0));
+    return service;
   }
 
   operator std::string() const {
@@ -205,27 +121,19 @@ struct SocketAddress {
  */
 class Socket {
   socket_handle_t handle_;
-  SocketAddress address_;
-  pollfd pollfd_{
-    INVALID_SOCKET_HANDLE,
-    0,
-    0
-  };
-
-protected:
+  std::unique_ptr<SocketAddress> address_;
 
 public:
   /**
    * Creates a socket given an address and initializes the socket handler.
    * @param address The address is moved to prevent modifications outside the wrapper
-   * @throw SocketException Thrown if the socket handler could not be created
+   * @throw std::invalid_argument Thrown if the socket handler could not be created
    */
-  Socket(SocketAddress &&address) : address_(std::move(address)) {
+  Socket(std::unique_ptr<SocketAddress> &&address) : address_(std::move(address)) {
     this->handle_ =
-      ::socket(address.ai_family, address.ai_socktype, address.ai_protocol);
-    this->pollfd_.fd = this->handle_;
+      ::socket(this->address_->ai_family, this->address_->ai_socktype, this->address_->ai_protocol);
     if (this->isInvalid()) {
-      throw SocketException("Invalid address", INVALID_SOCKET_HANDLE);
+      throw std::invalid_argument("Invalid address");
     }
   }
 
@@ -233,13 +141,13 @@ public:
    * Creates a socket with a valid socket handler and an address.
    * @param handle The socket handler to use
    * @param address The address is moved to prevent modifications outside the wrapper
-   * @throw SocketException Thrown if the handler is invalid
+   * @throw std::invalid_argument Thrown if the handler is invalid
    */
-  Socket(socket_handle_t handle, SocketAddress &&address) : address_(std::move(address)) {
+  Socket(socket_handle_t handle, std::unique_ptr<SocketAddress> &&address) : address_(
+    std::move(address)) {
     this->handle_ = handle;
-    this->pollfd_.fd = this->handle_;
     if (this->isInvalid()) {
-      throw SocketException("Invalid handle", INVALID_SOCKET_HANDLE);
+      throw std::invalid_argument("Invalid handle");
     }
   }
 
@@ -251,8 +159,6 @@ public:
   Socket(Socket &&socket) noexcept : address_(std::move(socket.address_)) {
     this->handle_ = socket.handle_;
     socket.handle_ = INVALID_SOCKET_HANDLE;
-    this->pollfd_ = socket.pollfd_;
-    socket.pollfd_.fd = INVALID_SOCKET_HANDLE;
   }
 
   /**
@@ -274,15 +180,13 @@ public:
     this->handle_ = socket.handle_;
     socket.handle_ = INVALID_SOCKET_HANDLE;
     this->address_ = std::move(socket.address_);
-    this->pollfd_ = socket.pollfd_;
-    socket.pollfd_.fd = INVALID_SOCKET_HANDLE;
     return *this;
   }
 
   /**
    * @return The address associated with the socket
    */
-  const SocketAddress &getAddress() const {
+  const std::unique_ptr<SocketAddress> &getAddress() const {
     return this->address_;
   }
 
@@ -300,7 +204,7 @@ public:
    * @param level The level at which the option is defined
    * @param option_name The socket option for which the value is to be returned
    * @return The value of the socket option
-   * @throw SocketException Thrown if the operation failed
+   * @throw utils::Exception Thrown if the operation failed
    * @see ::getsockopt
    */
   template<typename T>
@@ -312,7 +216,7 @@ public:
                                    reinterpret_cast<char *>(option_value),
                                    reinterpret_cast<socklen_t *>(&option_len));
     if (result != 0) {
-      SocketException::throwFromFailure(result, "GETSOCKOPT");
+      throw utils::Exception::from_last_failure();
     }
     return option_value;
   }
@@ -323,7 +227,7 @@ public:
    * @param level The level at which the option is defined
    * @param option_name The socket option for which the value is to be set
    * @param option_value A pointer to the value for the requested option
-   * @throw SocketException Thrown if the operation failed
+   * @throw utils::Exception Thrown if the operation failed
    * @see ::setsockopt
    */
   template<typename T>
@@ -333,7 +237,7 @@ public:
     result_t result = ::setsockopt(this->handle_, level, option_name,
                                    reinterpret_cast<char *>(option_value), option_len);
     if (result != 0) {
-      SocketException::throwFromFailure(result, "SETSOCKOPT");
+      throw utils::Exception::from_last_failure();
     }
   }
 
@@ -343,7 +247,7 @@ public:
    * @param level The level at which the option is defined
    * @param option_name The socket option for which the value is to be set
    * @param option_value The value for the requested option
-   * @throw SocketException Thrown if the operation failed
+   * @throw utils::Exception Thrown if the operation failed
    * @see ::setsockopt
    */
   template<typename T>
@@ -353,56 +257,56 @@ public:
     result_t result = ::setsockopt(this->handle_, level, option_name,
                                    reinterpret_cast<char *>(&option_value), option_len);
     if (result != 0) {
-      SocketException::throwFromFailure(result, "SETSOCKOPT");
+      throw utils::Exception::from_last_failure();
     }
   }
 
   /**
    * Binds the socket handler to the configured address.
-   * @throw SocketException Thrown if the binding failed
+   * @throw utils::Exception Thrown if the binding failed
    * @see ::bind
    */
   void bind() {
-    result_t result = ::bind(this->handle_, &this->address_.ai_addr,
-                             this->address_.ai_addrlen);
+    result_t result = ::bind(this->handle_, &this->address_->ai_addr,
+                             this->address_->ai_addrlen);
     if (result != 0) {
-      SocketException::throwFromFailure(result, "BIND");
+      throw utils::Exception::from_last_failure();
     }
   }
 
   /**
    * Connects the socket handler to the configured address.
-   * @throw SocketException Thrown if the connection failed
+   * @throw utils::Exception Thrown if the connection failed
    * @see ::connect
    */
   void connect() {
-    result_t result = ::connect(this->handle_, &this->address_.ai_addr,
-                                this->address_.ai_addrlen);
+    result_t result = ::connect(this->handle_, &this->address_->ai_addr,
+                                this->address_->ai_addrlen);
     if (result != 0) {
-      SocketException::throwFromFailure(result, "CONNECT");
+      throw utils::Exception::from_last_failure();
     }
   }
 
   /**
    *
    * @param max
-   * @throw SocketException
+   * @throw utils::Exception
    * @see ::listen
    */
   void listen(int max = SOMAXCONN) {
     result_t result = ::listen(this->handle_, max);
     if (result != 0) {
-      SocketException::throwFromFailure(result, "LISTEN");
+      throw utils::Exception::from_last_failure();
     }
   }
 
   /**
    *
    * @return
-   * @throw SocketExceptions
+   * @throw utils::Exception
    * @see ::accept
    */
-  Socket *accept() {
+  std::unique_ptr<Socket> accept() {
     socklen_t client_sock_address_len = sizeof(sockaddr_storage);
     auto client_sock_address =
       reinterpret_cast<sockaddr *>(new sockaddr_storage);
@@ -411,25 +315,12 @@ public:
     socket_handle_t client_socket =
       ::accept(this->handle_, client_sock_address, &client_sock_address_len);
     if (client_socket == INVALID_SOCKET_HANDLE) {
-      SocketException::throwFromFailure(static_cast<result_t>(client_socket), "ACCEPT");
+      throw utils::Exception::from_last_failure();
     }
-    auto socket_address =
-      SocketAddress(client_sock_address, client_sock_address_len);
+    auto socket_address = std::make_unique<SocketAddress>(client_sock_address,
+                                                          client_sock_address_len);
     delete client_sock_address;
-    return new Socket(client_socket, std::move(socket_address));
-  }
-
-  void setPollFdEvents(short int events = 0) {
-    this->pollfd_.events = events;
-  }
-
-  pollfd getPollFd(short int events) {
-    this->setPollFdEvents(events);
-    return this->pollfd_;
-  }
-
-  pollfd getPollFd() const {
-    return this->pollfd_;
+    return std::make_unique<Socket>(client_socket, std::move(socket_address));
   }
 
   /**
@@ -438,13 +329,13 @@ public:
    * @param len
    * @param flags
    * @return
-   * @throw SocketException
+   * @throw utils::Exception
    * @see ::recv
    */
   result_t recv(char *buf, size_t len, int flags = 0) {
     result_t result = ::recv(this->handle_, buf, len, flags);
     if (result < 0) {
-      SocketException::throwFromFailure(result, "RECVFROM");
+      throw utils::Exception::from_last_failure();
     }
     return result;
   }
@@ -456,14 +347,14 @@ public:
    * @param flags
    * @param address
    * @return
-   * @throw SocketException
+   * @throw utils::Exception
    * @see ::recvfrom
    */
   result_t recvfrom(char *buf, size_t len, int flags, SocketAddress &address) {
     result_t result = ::recvfrom(this->handle_, buf, len, flags, &address.ai_addr,
                                  &address.ai_addrlen);
     if (result < 0) {
-      SocketException::throwFromFailure(result, "RECVFROM");
+      throw utils::Exception::from_last_failure();
     }
     return result;
   }
@@ -474,13 +365,13 @@ public:
    * @param len
    * @param flags
    * @return
-   * @throw SocketException
+   * @throw utils::Exception
    * @see ::send
    */
   result_t send(const char *buf, size_t len, int flags = 0) {
     result_t result = ::send(this->handle_, buf, len, flags);
     if (result < 0) {
-      SocketException::throwFromFailure(result, "SEND");
+      throw utils::Exception::from_last_failure();
     }
     return result;
   }
@@ -492,7 +383,7 @@ public:
    * @param flags
    * @param address
    * @return
-   * @throw SocketException
+   * @throw utils::Exception
    * @see ::sendto
    */
   result_t sendto(const char *buf, size_t len, int flags,
@@ -500,7 +391,7 @@ public:
     result_t result = ::sendto(this->handle_, buf, len, flags, &address.ai_addr,
                                address.ai_addrlen);
     if (result < 0) {
-      SocketException::throwFromFailure(result, "SENDTO");
+      throw utils::Exception::from_last_failure();
     }
     return result;
   }
@@ -508,13 +399,13 @@ public:
   /**
    *
    * @param how
-   * @throw SocketException
+   * @throw utils::Exception
    * @see ::shutdown
    */
   void shutdown(int how) {
     result_t result = ::shutdown(this->handle_, how);
     if (result != 0) {
-      SocketException::throwFromFailure(result, "SHUTDOWN");
+      throw utils::Exception::from_last_failure();
     }
   }
 
@@ -538,75 +429,69 @@ protected:
     hints.ai_flags = ai_flags;
     result_t result = getaddrinfo(name, service, &hints, &info) != 0;
     if (result != 0) {
-      throw SocketException("Cannot get address info: %s", result,
-                            gai_strerror(static_cast<int>(result)));
+      throw utils::AddressInfoException(result);
     }
     return info;
   }
 
 public:
-  static Socket *boundSocket(int ai_family, int ai_socktype, int ai_protocol, const char *name,
-                             const char *service) {
+  static std::unique_ptr<Socket> boundSocket(int ai_family, int ai_socktype, int ai_protocol,
+                                             const char *name,
+                                             const char *service) {
     auto info = SocketFactory::getAddrinfo(ai_family, ai_socktype, ai_protocol, AI_PASSIVE, name,
                                            service);
 
-    Socket *sock = nullptr;
-    SocketException *error = nullptr;
+    std::unique_ptr<Socket> sock;
+    utils::Exception *error = nullptr;
     for (auto addr = info; addr != nullptr; addr = addr->ai_next) {
+      auto address = std::make_unique<SocketAddress>(addr);
       try {
-        sock = new Socket(addr);
+        sock = std::make_unique<Socket>(std::move(address));
         sock->bind();
-      } catch (SocketException &e) {
+      } catch (utils::Exception &e) {
         error = &e;
-        delete sock;
-        sock = nullptr;
+        sock.reset();
         continue;
       }
       break;
     }
     freeaddrinfo(info);
-    if (sock == nullptr) {
-      std::string message;
-      result_t result = 0;
+    if (!sock) {
+      std::string message = "Unknown error";
       if (error != nullptr) {
-        message += ": ";
-        message += error->what();
-        result = error->getResult();
+        message = std::move(error->getMessage());
       }
-      throw SocketException("Cannot create bound socket%s", result, message.c_str());
+      throw utils::MessageException("Cannot create bound socket: %s", message.c_str());
     }
     return sock;
   }
 
-  static Socket *connectedSocket(int ai_socktype, int ai_protocol, const char *name,
-                                 const char *service) {
+  static std::unique_ptr<Socket> connectedSocket(int ai_socktype, int ai_protocol, const char *name,
+                                                 const char *service) {
     auto info = SocketFactory::getAddrinfo(AF_UNSPEC, ai_socktype, ai_protocol, AI_PASSIVE, name,
                                            service);
 
-    Socket *sock = nullptr;
-    SocketException *error = nullptr;
+    std::unique_ptr<Socket> sock;
+    utils::Exception *error = nullptr;
     for (auto addr = info; addr != nullptr; addr = addr->ai_next) {
+      auto address = std::make_unique<SocketAddress>(addr);
       try {
-        sock = new Socket(addr);
+        sock = std::make_unique<Socket>(std::move(address));
         sock->connect();
-      } catch (SocketException &e) {
+      } catch (utils::Exception &e) {
         error = &e;
-        delete sock;
-        sock = nullptr;
+        sock.reset();
         continue;
       }
       break;
     }
     freeaddrinfo(info);
-    if (sock == nullptr) {
-      std::string message;
-      result_t result = 0;
+    if (!sock) {
+      std::string message = "Unknown error";
       if (error != nullptr) {
-        message += ": ";
-        message += error->what();
-        result = error->getResult();
+        message = std::move(error->getMessage());
       }
-      throw SocketException("Cannot create connected socket%s", result, message.c_str());
+      throw utils::MessageException("Cannot create connected socket: %s", message.c_str());
     }
     return sock;
   }

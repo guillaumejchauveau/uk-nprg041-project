@@ -9,7 +9,6 @@ int main() {
 
   char buf[1000];
   memset(buf, 0, 1000);
-  int bytes_count = sock->recv(buf, 999);
+  auto bytes_count = sock->recv(buf, 999);
   std::cout << bytes_count << " bytes received" << std::endl;
-  delete sock;
 }
