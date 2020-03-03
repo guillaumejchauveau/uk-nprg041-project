@@ -7,6 +7,8 @@
 #include <cerrno>
 #include <memory>
 #include <mutex>
+#include <cstring>
+#include <netdb.h>
 
 namespace utils {
 #if defined(_WIN32)
@@ -69,27 +71,32 @@ public:
 #endif
   }
 
+  /**
+   * The message is allocated in a container with static and thread storage duration. This makes the
+   * message remain in memory even after the execution of the function. However, calling the same
+   * method on another instance in the same thread will overwrite the message. A call in a different
+   * thread will not be an issue.
+   */
   const char *what() const noexcept override {
-    static std::string buff = this->getMessage();
-    return buff.c_str();
+    static thread_local std::string message;
+    message = this->getMessage();
+    return message.c_str();
   }
 };
 
 class AddressInfoException : public Exception {
 public:
+  static std::mutex lock;
+
   explicit AddressInfoException(int result) : Exception(result) {
   }
 
-#if !defined(_WIN32) // Unix only
+#if !defined(_WIN32) // Linux only
 
   std::string getMessage() const override {
     // gai_strerror is not thread safe.
-    /// @see https://en.cppreference.com/w/cpp/language/storage_duration#Static_local_variables
-    static std::mutex lock;
-    lock.lock();
-    auto message = gai_strerror(static_cast<int>(this->getResult()));
-    lock.unlock();
-    return message;
+    std::lock_guard<std::mutex> g(AddressInfoException::lock);
+    return gai_strerror(static_cast<int>(this->getResult()));
   }
 
 #endif

@@ -120,7 +120,11 @@ class Socket {
 protected:
   socket_handle_t handle_;
   std::unique_ptr<SocketAddress> address_;
+  int last_error_;
 
+  /**
+   * @throw std::runtime_error Thrown if the socket is in an invalid state
+   */
   void checkState() const {
     if (this->isInvalid()) {
       throw std::runtime_error("Invalid socket state");
@@ -130,16 +134,24 @@ protected:
   static bool isCodeEWouldBlock(long int code);
   static bool isCodeEInProgress(long int code);
 
+  void setNonBlocking();
+  socket_handle_t acceptCall(sockaddr *client_sock_address, socklen_t *client_sock_address_len,
+                             bool non_blocking_accepted) const;
+
 public:
   /**
    * Creates a socket given an address and initializes the socket handler.
    * @param address The address is moved to prevent modifications outside the wrapper
    * @throw std::invalid_argument Thrown if the socket handler could not be created
    */
-  Socket(std::unique_ptr<SocketAddress> &&address) : address_(std::move(address)) {
+  Socket(std::unique_ptr<SocketAddress> &&address) : address_(
+    std::move(address)) {
     this->handle_ =
-      ::socket(this->address_->ai_family, this->address_->ai_socktype, this->address_->ai_protocol);
+      ::socket(this->address_->ai_family, this->address_->ai_socktype,
+               this->address_->ai_protocol);
+    this->last_error_ = 0;
     if (this->isInvalid()) {
+      this->last_error_ = -1;
       throw std::invalid_argument("Invalid address");
     }
   }
@@ -153,7 +165,9 @@ public:
   Socket(socket_handle_t handle, std::unique_ptr<SocketAddress> &&address) : address_(
     std::move(address)) {
     this->handle_ = handle;
+    this->last_error_ = 0;
     if (this->isInvalid()) {
+      this->last_error_ = -1;
       throw std::invalid_argument("Invalid handle");
     }
   }
@@ -163,9 +177,13 @@ public:
    */
   Socket(const Socket &socket) = delete;
 
+  /**
+   * Move constructor.
+   */
   Socket(Socket &&socket) noexcept : address_(std::move(socket.address_)) {
     this->handle_ = socket.handle_;
     socket.handle_ = INVALID_SOCKET_HANDLE;
+    this->last_error_ = socket.last_error_;
   }
 
   /**
@@ -180,6 +198,9 @@ public:
    */
   Socket &operator=(const Socket &socket) = delete;
 
+  /**
+   * Move assignment.
+   */
   Socket &operator=(Socket &&socket) noexcept {
     if (this == &socket) {
       return *this;
@@ -187,6 +208,7 @@ public:
     this->handle_ = socket.handle_;
     socket.handle_ = INVALID_SOCKET_HANDLE;
     this->address_ = std::move(socket.address_);
+    this->last_error_ = socket.last_error_;
     return *this;
   }
 
@@ -207,6 +229,14 @@ public:
    */
   bool isInvalid() const {
     return this->handle_ == INVALID_SOCKET_HANDLE;
+  }
+
+  int getLastError() {
+    auto error = this->getsockopt<int>(SOL_SOCKET, SO_ERROR);
+    if (error != 0) {
+      this->last_error_ = *error;
+    }
+    return this->last_error_;
   }
 
   /**
@@ -321,7 +351,7 @@ public:
    * @throw utils::Exception
    * @see ::accept
    */
-  std::unique_ptr<Socket> accept() {
+  std::unique_ptr<Socket> accept(bool non_blocking_accepted = false) const {
     this->checkState();
     socklen_t client_sock_address_len = sizeof(sockaddr_storage);
     auto client_sock_address =
@@ -329,7 +359,7 @@ public:
     memset(client_sock_address, 0, static_cast<size_t>(client_sock_address_len));
 
     socket_handle_t client_socket =
-      ::accept(this->handle_, client_sock_address, &client_sock_address_len);
+      this->acceptCall(client_sock_address, &client_sock_address_len, non_blocking_accepted);
     if (client_socket == INVALID_SOCKET_HANDLE) {
       auto error = utils::Exception::getLastFailureCode();
       if (isCodeEWouldBlock(error)) {
@@ -352,7 +382,7 @@ public:
    * @throw utils::Exception
    * @see ::recv
    */
-  long int recv(char *buf, size_t len, int flags = 0) {
+  long int recv(char *buf, size_t len, int flags = 0) const {
     this->checkState();
     auto count = ::recv(this->handle_, buf, len, flags);
     if (count < 0) {
@@ -375,7 +405,7 @@ public:
    * @throw utils::Exception
    * @see ::recvfrom
    */
-  long int recvfrom(char *buf, size_t len, int flags, SocketAddress &address) {
+  long int recvfrom(char *buf, size_t len, int flags, SocketAddress &address) const {
     this->checkState();
     auto count = ::recvfrom(this->handle_, buf, len, flags, &address.ai_addr,
                             &address.ai_addrlen);
@@ -398,7 +428,7 @@ public:
    * @throw utils::Exception
    * @see ::send
    */
-  long int send(const char *buf, size_t len, int flags = 0) {
+  long int send(const char *buf, size_t len, int flags = 0) const {
     this->checkState();
     auto count = ::send(this->handle_, buf, len, flags);
     if (count < 0) {
@@ -422,7 +452,7 @@ public:
    * @see ::sendto
    */
   long int sendto(const char *buf, size_t len, int flags,
-                  const SocketAddress &address) {
+                  const SocketAddress &address) const {
     this->checkState();
     auto count = ::sendto(this->handle_, buf, len, flags, &address.ai_addr,
                           address.ai_addrlen);
@@ -454,6 +484,8 @@ public:
    * @see ::close
    */
   void close();
+
+  friend class SocketFactory;
 };
 
 class SocketFactory {
@@ -476,8 +508,8 @@ protected:
 
 public:
   static std::unique_ptr<Socket> boundSocket(int ai_family, int ai_socktype, int ai_protocol,
-                                             const char *name,
-                                             const char *service) {
+                                             const char *name, const char *service,
+                                             bool non_blocking = false, bool reuse = false) {
     auto info = SocketFactory::getAddrinfo(ai_family, ai_socktype, ai_protocol, AI_PASSIVE, name,
                                            service);
 
@@ -487,6 +519,12 @@ public:
       auto address = std::make_unique<SocketAddress>(addr);
       try {
         sock = std::make_unique<Socket>(std::move(address));
+        if (non_blocking) {
+          sock->setNonBlocking();
+        }
+        if (reuse) {
+          sock->setsockopt(SOL_SOCKET, SO_REUSEADDR, 1);
+        }
         sock->bind();
       } catch (utils::Exception &e) {
         error = std::make_unique<utils::Exception>(std::move(e));
@@ -507,9 +545,8 @@ public:
   }
 
   static std::unique_ptr<Socket> connectedSocket(int ai_socktype, int ai_protocol, const char *name,
-                                                 const char *service) {
-    auto info = SocketFactory::getAddrinfo(AF_UNSPEC, ai_socktype, ai_protocol, AI_PASSIVE, name,
-                                           service);
+                                                 const char *service, bool non_blocking = false) {
+    auto info = SocketFactory::getAddrinfo(AF_UNSPEC, ai_socktype, ai_protocol, 0, name, service);
 
     std::unique_ptr<Socket> sock;
     std::unique_ptr<utils::Exception> error;
@@ -517,6 +554,9 @@ public:
       auto address = std::make_unique<SocketAddress>(addr);
       try {
         sock = std::make_unique<Socket>(std::move(address));
+        if (non_blocking) {
+          sock->setNonBlocking();
+        }
         sock->connect();
       } catch (utils::Exception &e) {
         error = std::make_unique<utils::Exception>(std::move(e));
@@ -538,6 +578,10 @@ public:
 };
 
 class SocketInitializer {
+protected:
+#if defined(_WIN32)
+  WSADATA wsadata_{};
+#endif
 public:
   SocketInitializer();
   ~SocketInitializer();
