@@ -2,7 +2,7 @@
 #include "tcp.h"
 #include "sys/epoll.h"
 
-#define TCP_CLIENT_EVENTS EPOLLIN | EPOLLRDHUP | EPOLLET | EPOLLONESHOT
+#define TCP_CLIENT_EVENTS (EPOLLIN | EPOLLRDHUP | EPOLLET | EPOLLONESHOT)
 
 namespace net {
 TCPServer::TCPServer(std::unique_ptr<Socket> &&socket) : socket_(std::move(socket)) {
@@ -69,6 +69,9 @@ void TCPServer::run() {
         this->addClient(std::move(client));
       } else { // A connected client changed state.
         client = this->takeClient(event_fd); // Takes ownership of the client.
+        if (!client) { // Client has been taken by another thread.
+          continue;
+        }
         client = this->processClient(std::move(client)); // Processes the client's data.
 
         if ((ready[i].events & EPOLLRDHUP) == EPOLLRDHUP) { // Client has disconnected.

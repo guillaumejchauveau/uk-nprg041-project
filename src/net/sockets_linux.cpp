@@ -21,15 +21,30 @@ void Socket::setNonBlocking() {
   }
 }
 
-socket_handle_t Socket::acceptCall(sockaddr *client_sock_address,
-                                   socklen_t *client_sock_address_len,
-                                   bool non_blocking_accepted) const {
+std::unique_ptr<Socket> Socket::accept(bool non_blocking_accepted) const {
+  this->checkState();
+  socklen_t client_sock_address_len = sizeof(sockaddr_storage);
+  auto client_sock_address =
+    reinterpret_cast<sockaddr *>(new sockaddr_storage);
+  memset(client_sock_address, 0, static_cast<size_t>(client_sock_address_len));
+
   int flags = 0;
   if (non_blocking_accepted) {
     flags = SOCK_NONBLOCK;
   }
-  return
-    ::accept4(this->handle_, client_sock_address, client_sock_address_len, flags);
+  socket_handle_t client_socket =
+    ::accept4(this->handle_, client_sock_address, &client_sock_address_len, flags);
+  if (client_socket == INVALID_SOCKET_HANDLE) {
+    auto error = utils::Exception::getLastFailureCode();
+    if (isCodeEWouldBlock(error)) {
+      return nullptr;
+    }
+    throw utils::Exception(error);
+  }
+  auto socket_address = std::make_unique<SocketAddress>(client_sock_address,
+                                                        client_sock_address_len);
+  delete client_sock_address;
+  return std::make_unique<Socket>(client_socket, std::move(socket_address));
 }
 
 void Socket::close() {

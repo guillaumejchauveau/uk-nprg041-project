@@ -23,17 +23,31 @@ void Socket::setNonBlocking() {
   }
 }
 
-socket_handle_t Socket::acceptCall(sockaddr *client_sock_address,
-                                   socklen_t *client_sock_address_len,
-                                   bool non_blocking_accepted) {
-  socket_handle_t client =
-    ::accept(this->handle_, client_sock_address, client_sock_address_len);
-  if (non_blocking_accepted && client != INVALID_SOCKET_HANDLE) {
-    this->setNonBlocking();
+std::unique_ptr<Socket> Socket::accept(bool non_blocking_accepted) const {
+  this->checkState();
+  socklen_t client_sock_address_len = sizeof(sockaddr_storage);
+  auto client_sock_address =
+    reinterpret_cast<sockaddr *>(new sockaddr_storage);
+  memset(client_sock_address, 0, static_cast<size_t>(client_sock_address_len));
+
+  socket_handle_t client_socket =
+    ::accept(this->handle_, client_sock_address, &client_sock_address_len);
+  if (client_socket == INVALID_SOCKET_HANDLE) {
+    auto error = utils::Exception::getLastFailureCode();
+    if (isCodeEWouldBlock(error)) {
+      return nullptr;
+    }
+    throw utils::Exception(error);
+  }
+  auto socket_address = std::make_unique<SocketAddress>(client_sock_address,
+                                                        client_sock_address_len);
+  delete client_sock_address;
+  auto client = std::make_unique<Socket>(client_socket, std::move(socket_address));
+  if (non_blocking_accepted) {
+    client->setNonBlocking();
   }
   return client;
 }
-
 
 SocketInitializer::SocketInitializer() {
   if (WSAStartup(MAKEWORD(2, 2), &this->wsadata_) == SOCKET_ERROR) {

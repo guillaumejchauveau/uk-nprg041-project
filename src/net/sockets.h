@@ -135,8 +135,6 @@ protected:
   static bool isCodeEInProgress(long int code);
 
   void setNonBlocking();
-  socket_handle_t acceptCall(sockaddr *client_sock_address, socklen_t *client_sock_address_len,
-                             bool non_blocking_accepted) const;
 
 public:
   /**
@@ -233,7 +231,7 @@ public:
 
   int getLastError() {
     auto error = this->getsockopt<int>(SOL_SOCKET, SO_ERROR);
-    if (error != 0) {
+    if (*error != 0) {
       this->last_error_ = *error;
     }
     return this->last_error_;
@@ -351,27 +349,7 @@ public:
    * @throw utils::Exception
    * @see ::accept
    */
-  std::unique_ptr<Socket> accept(bool non_blocking_accepted = false) const {
-    this->checkState();
-    socklen_t client_sock_address_len = sizeof(sockaddr_storage);
-    auto client_sock_address =
-      reinterpret_cast<sockaddr *>(new sockaddr_storage);
-    memset(client_sock_address, 0, static_cast<size_t>(client_sock_address_len));
-
-    socket_handle_t client_socket =
-      this->acceptCall(client_sock_address, &client_sock_address_len, non_blocking_accepted);
-    if (client_socket == INVALID_SOCKET_HANDLE) {
-      auto error = utils::Exception::getLastFailureCode();
-      if (isCodeEWouldBlock(error)) {
-        return nullptr;
-      }
-      throw utils::Exception(error);
-    }
-    auto socket_address = std::make_unique<SocketAddress>(client_sock_address,
-                                                          client_sock_address_len);
-    delete client_sock_address;
-    return std::make_unique<Socket>(client_socket, std::move(socket_address));
-  }
+  std::unique_ptr<Socket> accept(bool non_blocking_accepted = false) const;
 
   /**
    *
@@ -488,8 +466,21 @@ public:
   friend class SocketFactory;
 };
 
+/**
+ *
+ */
 class SocketFactory {
 protected:
+  /**
+   *
+   * @param ai_family
+   * @param ai_socktype
+   * @param ai_protocol
+   * @param ai_flags
+   * @param name
+   * @param service
+   * @return
+   */
   static addrinfo *getAddrinfo(int ai_family, int ai_socktype, int ai_protocol, int ai_flags,
                                const char *name,
                                const char *service) {
@@ -499,7 +490,7 @@ protected:
     hints.ai_socktype = ai_socktype;
     hints.ai_protocol = ai_protocol;
     hints.ai_flags = ai_flags;
-    auto code = getaddrinfo(name, service, &hints, &info) != 0;
+    int code = getaddrinfo(name, service, &hints, &info) != 0;
     if (code != 0) {
       throw utils::AddressInfoException(code);
     }
@@ -507,6 +498,17 @@ protected:
   }
 
 public:
+  /**
+   *
+   * @param ai_family
+   * @param ai_socktype
+   * @param ai_protocol
+   * @param name
+   * @param service
+   * @param non_blocking
+   * @param reuse
+   * @return
+   */
   static std::unique_ptr<Socket> boundSocket(int ai_family, int ai_socktype, int ai_protocol,
                                              const char *name, const char *service,
                                              bool non_blocking = false, bool reuse = false) {
@@ -544,6 +546,15 @@ public:
     return sock;
   }
 
+  /**
+   *
+   * @param ai_socktype
+   * @param ai_protocol
+   * @param name
+   * @param service
+   * @param non_blocking
+   * @return
+   */
   static std::unique_ptr<Socket> connectedSocket(int ai_socktype, int ai_protocol, const char *name,
                                                  const char *service, bool non_blocking = false) {
     auto info = SocketFactory::getAddrinfo(AF_UNSPEC, ai_socktype, ai_protocol, 0, name, service);
@@ -577,6 +588,9 @@ public:
   }
 };
 
+/**
+ *
+ */
 class SocketInitializer {
 protected:
 #if defined(_WIN32)

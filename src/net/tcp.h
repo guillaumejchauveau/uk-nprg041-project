@@ -8,7 +8,9 @@
 #include <iostream>
 
 namespace net {
-
+/**
+ *
+ */
 class TCPServer {
 protected:
   std::unique_ptr<Socket> socket_{};
@@ -22,6 +24,10 @@ protected:
   const int MAX_EVENT = 10;
 #endif
 
+  /**
+   *
+   * @param client
+   */
   void addClient(std::unique_ptr<Socket> &&client) {
     this->clients_lock_.lock();
     auto handle = client->getHandle();
@@ -29,13 +35,22 @@ protected:
     this->clients_lock_.unlock();
   }
 
+  /**
+   *
+   * @param fd
+   * @return
+   */
   std::unique_ptr<Socket> takeClient(int fd) {
     this->clients_lock_.lock();
-    auto client = this->clients_[fd].take(); // TODO: Check if a thread blocked at this point will crash because of the owning thread calling removeClient().
+    auto &locker = this->clients_[fd];
     this->clients_lock_.unlock();
-    return client;
+    return locker.try_take();
   }
 
+  /**
+   *
+   * @param client
+   */
   void yieldClient(std::unique_ptr<Socket> &&client) {
     this->clients_lock_.lock();
     auto handle = client->getHandle();
@@ -49,47 +64,61 @@ protected:
    */
   void removeClient(int fd) {
     this->clients_lock_.lock();
+    this->clients_[fd].reset();
     this->clients_.erase(fd);
     this->clients_lock_.unlock();
   }
 
-  virtual std::unique_ptr<Socket> &&processClient(std::unique_ptr<Socket> &&client) {
-    char buf[20];
-    long read = 0;
-    std::cout << "Receiving" << std::endl;
-    while ((read = client->recv(buf, 19)) > 0) {
-    }
-    std::ostringstream res;
-    res << "HTTP/1.1 200 OK" << std::endl << std::endl;
-    res << "Hello" << std::endl << std::endl;
-    auto string = res.str();
-    client->send(string.c_str(), string.size());
-    std::cout << "Sent" << std::endl;
-    return std::move(client);
-  };
+  /**
+   *
+   * @param client
+   * @return
+   */
+  virtual std::unique_ptr<Socket> &&processClient(std::unique_ptr<Socket> &&client) = 0;
 
 public:
+  /**
+   *
+   * @param socket
+   */
   explicit TCPServer(std::unique_ptr<Socket> &&socket);
-
+  /**
+   *
+   * @param tcp_server
+   */
   TCPServer(const TCPServer &tcp_server) = delete;
-
+  /**
+   *
+   * @param tcp_server
+   */
   TCPServer(TCPServer &&tcp_server) noexcept;
-
-  TCPServer operator=(const TCPServer &tcp_server) = delete;
-
+  /**
+   *
+   * @param tcp_server
+   * @return
+   */
+  TCPServer &operator=(const TCPServer &tcp_server) = delete;
+  /**
+   *
+   * @param tcp_server
+   * @return
+   */
   TCPServer &operator=(TCPServer &&tcp_server) noexcept;
+  /**
+   *
+   */
+  virtual ~TCPServer() = default;
 
+  /**
+   *
+   * @param max
+   */
   void listen(int max = SOMAXCONN);
-
+  /**
+   *
+   */
   void run();
-
-  static std::unique_ptr<TCPServer> with(int ai_family, const char *name, const char *service,
-                                         bool reuse = false) {
-    return std::make_unique<TCPServer>(
-      SocketFactory::boundSocket(ai_family, SOCK_STREAM, IPPROTO_TCP, name, service, true, reuse));
-  }
 };
-
 } // namespace net
 
 #endif //NET_TCP_H

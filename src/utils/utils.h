@@ -29,8 +29,7 @@ public:
   /**
    * Default constructor.
    */
-  UniqueLocker() {
-  }
+  UniqueLocker() = default;
 
   /**
    * Constructs the locker with data.
@@ -38,6 +37,11 @@ public:
    */
   UniqueLocker(std::unique_ptr<T> &&data) : data_(std::move(data)) {
   }
+
+  /**
+   * Prevents copy.
+   */
+  UniqueLocker(const UniqueLocker &other) = delete;
 
   /**
    * Move constructor.
@@ -53,7 +57,13 @@ public:
    */
   UniqueLocker &operator=(std::unique_ptr<T> &&data) {
     this->data_ = std::move(data);
+    return *this;
   }
+
+  /**
+   * Prevents copy.
+   */
+  UniqueLocker &operator=(const UniqueLocker<T> &other) = delete;
 
   /**
    * Move assignment.
@@ -78,12 +88,33 @@ public:
   }
 
   /**
+   * Tries to take ownership of the data. An empty unique pointer is returned if
+   * the data is out of the locker.
+   * @return The data or an empty pointer
+   */
+  std::unique_ptr<T> try_take() {
+    if (!this->lock_.try_lock()) {
+      return nullptr;
+    }
+    return std::move(this->data_);
+  }
+
+  /**
    * Yields back ownership of the data. The data can be different from the original.
    * Behavior is undefined if called without ownership.
    * @param data The data
    */
   void yield(std::unique_ptr<T> &&data) {
     this->data_ = std::move(data);
+    this->lock_.unlock();
+  }
+
+  /**
+   * Resets the data.
+   * Behavior is undefined if called without ownership.
+   */
+  void reset() {
+    this->data_.reset();
     this->lock_.unlock();
   }
 };

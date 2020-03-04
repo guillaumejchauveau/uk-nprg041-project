@@ -4,22 +4,38 @@
 #include "utils.h"
 #include <exception>
 #include <stdexcept>
-#include <cerrno>
 #include <memory>
 #include <mutex>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+
+#include <windows.h>
+#else
+#include <cerrno>
 #include <cstring>
 #include <netdb.h>
 
+#endif
+
 namespace utils {
 #if defined(_WIN32)
+/**
+ *
+ */
 struct LocalFreeHelper {
-  void operator()(void *toFree) {
+  void operator()(void *toFree) const {
     ::LocalFree(reinterpret_cast<HLOCAL>(toFree));
   };
 };
 #else
 #endif
 
+/**
+ *
+ */
 class Exception : public std::exception {
 protected:
   long int code;
@@ -32,6 +48,10 @@ public:
     this->code = code;
   }
 
+  /**
+   *
+   * @return
+   */
   static long int getLastFailureCode() {
 #if defined(_WIN32)
     return ::GetLastError();
@@ -40,14 +60,26 @@ public:
 #endif
   }
 
+  /**
+   *
+   * @return
+   */
   static Exception fromLastFailure() {
     return Exception(Exception::getLastFailureCode());
   }
 
+  /**
+   *
+   * @return
+   */
   long int getResult() const {
     return this->code;
   }
 
+  /**
+   *
+   * @return
+   */
   virtual std::string getMessage() const {
 #if defined(_WIN32)
     std::unique_ptr<wchar_t[], LocalFreeHelper> buff;
@@ -84,10 +116,16 @@ public:
   }
 };
 
+/**
+ *
+ */
 class AddressInfoException : public Exception {
-public:
   static std::mutex lock;
-
+public:
+  /**
+   *
+   * @param result
+   */
   explicit AddressInfoException(int result) : Exception(result) {
   }
 
@@ -100,14 +138,15 @@ public:
   }
 
 #endif
-
 };
 
+/**
+ *
+ */
 class MessageException : public std::exception {
 protected:
   std::string message;
 public:
-
   /**
    * Creates an instance using printf-style formatting.
    *
@@ -130,6 +169,5 @@ public:
     return this->message.c_str();
   }
 };
-
 } // namespace utils
 #endif //UTILS_EXCEPTION_H
