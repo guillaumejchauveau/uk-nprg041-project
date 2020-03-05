@@ -42,18 +42,35 @@ struct SocketAddress {
   socklen_t ai_addrlen;
   sockaddr ai_addr;
 
+  /**
+   * Creates an instance with a socket address only.
+   * @param addr The socket address
+   * @param addrlen The length of the socket address
+   */
   SocketAddress(sockaddr *addr, socklen_t addrlen) noexcept : ai_addr(*addr) {
     this->ai_family = addr->sa_family;
-    this->ai_socktype = 0;
-    this->ai_protocol = 0;
+    this->ai_socktype = -1;
+    this->ai_protocol = -1;
     this->ai_addrlen = addrlen;
   }
 
+  /**
+   * Creates an instance from an address info structure. The structure is not
+   * freed.
+   * @param addrinfo
+   */
   SocketAddress(addrinfo *addrinfo) noexcept : ai_addr(*addrinfo->ai_addr) {
     this->ai_family = addrinfo->ai_family;
     this->ai_socktype = addrinfo->ai_socktype;
     this->ai_protocol = addrinfo->ai_protocol;
     this->ai_addrlen = addrinfo->ai_addrlen;
+  }
+
+  SocketAddress(const SocketAddress &socket_address) : ai_addr(socket_address.ai_addr) {
+    this->ai_family = socket_address.ai_family;
+    this->ai_socktype = socket_address.ai_socktype;
+    this->ai_protocol = socket_address.ai_protocol;
+    this->ai_addrlen = socket_address.ai_addrlen;
   }
 
   SocketAddress(SocketAddress &&socket_address) noexcept : ai_addr(socket_address.ai_addr) {
@@ -63,7 +80,7 @@ struct SocketAddress {
     this->ai_addrlen = socket_address.ai_addrlen;
   }
 
-  SocketAddress &operator=(SocketAddress &&socket_address) noexcept {
+  SocketAddress &operator=(const SocketAddress &socket_address) {
     this->ai_family = socket_address.ai_family;
     this->ai_socktype = socket_address.ai_socktype;
     this->ai_protocol = socket_address.ai_protocol;
@@ -72,6 +89,23 @@ struct SocketAddress {
     return *this;
   }
 
+  SocketAddress &operator=(SocketAddress &&socket_address) noexcept {
+    if (this == &socket_address) {
+      return *this;
+    }
+    this->ai_family = socket_address.ai_family;
+    this->ai_socktype = socket_address.ai_socktype;
+    this->ai_protocol = socket_address.ai_protocol;
+    this->ai_addrlen = socket_address.ai_addrlen;
+    this->ai_addr = socket_address.ai_addr;
+    return *this;
+  }
+
+  /**
+   * Retrieves the host name corresponding to the address.
+   * @param flags Flags for ::getnameinfo
+   * @return The host name
+   */
   std::string getHost(int flags = 0) const {
     std::string host;
     host.resize(20);
@@ -90,6 +124,11 @@ struct SocketAddress {
     return host;
   }
 
+  /**
+   * Retrieves the service/port corresponding to the address.
+   * @param flags Flags for ::getnameinfo
+   * @return The service name
+   */
   std::string getService(int flags = 0) const {
     std::string service;
     service.resize(20);
@@ -108,6 +147,9 @@ struct SocketAddress {
     return service;
   }
 
+  /**
+   * @return A string with the form "host:port"
+   */
   operator std::string() const {
     return this->getHost() + ":" + this->getService(NI_NUMERICSERV);
   }
@@ -131,9 +173,21 @@ protected:
     }
   }
 
-  static bool isCodeEWouldBlock(long int code);
-  static bool isCodeEInProgress(long int code);
-
+  /**
+   * Asserts if the given error equals EWOULDBLOCK, depending on the platform.
+   * @param error The error
+   * @return The result of the test
+   */
+  static bool isErrorEWouldBlock(long int error);
+  /**
+   * Asserts if the given error equals EINPROGRESS, depending on the platform.
+   * @param error The error
+   * @return The result of the test
+   */
+  static bool isErrorEInProgress(long int error);
+  /**
+   *
+   */
   void setNonBlocking();
 
 public:
@@ -175,9 +229,6 @@ public:
    */
   Socket(const Socket &socket) = delete;
 
-  /**
-   * Move constructor.
-   */
   Socket(Socket &&socket) noexcept : address_(std::move(socket.address_)) {
     this->handle_ = socket.handle_;
     socket.handle_ = INVALID_SOCKET_HANDLE;
@@ -196,9 +247,6 @@ public:
    */
   Socket &operator=(const Socket &socket) = delete;
 
-  /**
-   * Move assignment.
-   */
   Socket &operator=(Socket &&socket) noexcept {
     if (this == &socket) {
       return *this;
@@ -217,6 +265,9 @@ public:
     return this->address_;
   }
 
+  /**
+   * @return The actual handler for the socket
+   */
   socket_handle_t getHandle() const {
     return this->handle_;
   }
@@ -229,6 +280,9 @@ public:
     return this->handle_ == INVALID_SOCKET_HANDLE;
   }
 
+  /**
+   * @return The last non-zero socket error as returned by ::getsockopt
+   */
   int getLastError() {
     auto error = this->getsockopt<int>(SOL_SOCKET, SO_ERROR);
     if (*error != 0) {
@@ -255,7 +309,7 @@ public:
     if ((::getsockopt(this->handle_, level, option_name,
                       reinterpret_cast<char *>(option_value),
                       reinterpret_cast<socklen_t *>(&option_len))) != 0) {
-      throw utils::Exception::fromLastFailure();
+      throw utils::Exception::fromLastError();
     }
     return std::unique_ptr<T>(option_value);
   }
@@ -276,7 +330,7 @@ public:
     // Option value reinterpreted for WinSock.
     if ((::setsockopt(this->handle_, level, option_name,
                       reinterpret_cast<char *>(option_value), option_len)) != 0) {
-      throw utils::Exception::fromLastFailure();
+      throw utils::Exception::fromLastError();
     }
   }
 
@@ -296,7 +350,7 @@ public:
     // Option value reinterpreted for WinSock.
     if ((::setsockopt(this->handle_, level, option_name,
                       reinterpret_cast<char *>(&option_value), option_len)) != 0) {
-      throw utils::Exception::fromLastFailure();
+      throw utils::Exception::fromLastError();
     }
   }
 
@@ -309,7 +363,7 @@ public:
     this->checkState();
     if ((::bind(this->handle_, &this->address_->ai_addr,
                 this->address_->ai_addrlen)) != 0) {
-      throw utils::Exception::fromLastFailure();
+      throw utils::Exception::fromLastError();
     }
   }
 
@@ -322,8 +376,8 @@ public:
     this->checkState();
     if ((::connect(this->handle_, &this->address_->ai_addr,
                    this->address_->ai_addrlen)) != 0) {
-      auto error = utils::Exception::getLastFailureCode();
-      if (isCodeEInProgress(error)) {
+      auto error = utils::Exception::getLastError();
+      if (Socket::isErrorEInProgress(error)) {
         return;
       }
       throw utils::Exception(error);
@@ -331,41 +385,43 @@ public:
   }
 
   /**
-   *
-   * @param max
-   * @throw utils::Exception
+   * Listens for incoming connections.
+   * @param max Maximum number of pending connection requests
+   * @throw utils::Exception Thrown if the operation failed
    * @see ::listen
    */
   void listen(int max = SOMAXCONN) {
     this->checkState();
     if ((::listen(this->handle_, max)) != 0) {
-      throw utils::Exception::fromLastFailure();
+      throw utils::Exception::fromLastError();
     }
   }
 
   /**
-   *
-   * @return
-   * @throw utils::Exception
+   * Accepts an incoming connection.
+   * @param non_blocking_accepted Sets the client's socket asynchronous
+   * @return The socket of the connected client
+   * @throw utils::Exception Thrown if the operation failed
    * @see ::accept
    */
   std::unique_ptr<Socket> accept(bool non_blocking_accepted = false) const;
 
   /**
-   *
-   * @param buf
-   * @param len
-   * @param flags
-   * @return
-   * @throw utils::Exception
+   * Receives data through the socket.
+   * @param buf The buffer to store the data
+   * @param len The length of the buffer
+   * @param flags Flags for ::recv
+   * @return The number of bytes written to the buffer. -1 if receiving would
+   *  block on an asynchronous socket
+   * @throw utils::Exception Thrown if the operation failed
    * @see ::recv
    */
   long int recv(char *buf, size_t len, int flags = 0) const {
     this->checkState();
     auto count = ::recv(this->handle_, buf, len, flags);
     if (count < 0) {
-      auto error = utils::Exception::getLastFailureCode();
-      if (isCodeEWouldBlock(error)) {
+      auto error = utils::Exception::getLastError();
+      if (Socket::isErrorEWouldBlock(error)) {
         return -1;
       }
       throw utils::Exception(error);
@@ -374,44 +430,21 @@ public:
   }
 
   /**
-   *
-   * @param buf
-   * @param len
-   * @param flags
-   * @param address
-   * @return
-   * @throw utils::Exception
-   * @see ::recvfrom
-   */
-  long int recvfrom(char *buf, size_t len, int flags, SocketAddress &address) const {
-    this->checkState();
-    auto count = ::recvfrom(this->handle_, buf, len, flags, &address.ai_addr,
-                            &address.ai_addrlen);
-    if (count < 0) {
-      auto error = utils::Exception::getLastFailureCode();
-      if (isCodeEWouldBlock(error)) {
-        return -1;
-      }
-      throw utils::Exception(error);
-    }
-    return count;
-  }
-
-  /**
-   *
-   * @param buf
-   * @param len
-   * @param flags
-   * @return
-   * @throw utils::Exception
+   * Sends data through the socket.
+   * @param buf The buffer of data to send
+   * @param len The length of the buffer
+   * @param flags Flags for ::send
+   * @return The number of bytes sent. -1 if sending would  block on an
+   *  asynchronous socket
+   * @throw utils::Exception Thrown if the operation failed
    * @see ::send
    */
   long int send(const char *buf, size_t len, int flags = 0) const {
     this->checkState();
     auto count = ::send(this->handle_, buf, len, flags);
     if (count < 0) {
-      auto error = utils::Exception::getLastFailureCode();
-      if (isCodeEWouldBlock(error)) {
+      auto error = utils::Exception::getLastError();
+      if (Socket::isErrorEWouldBlock(error)) {
         return -1;
       }
       throw utils::Exception(error);
@@ -420,40 +453,18 @@ public:
   }
 
   /**
-   *
-   * @param buf
-   * @param len
-   * @param flags
-   * @param address
-   * @return
-   * @throw utils::Exception
-   * @see ::sendto
-   */
-  long int sendto(const char *buf, size_t len, int flags,
-                  const SocketAddress &address) const {
-    this->checkState();
-    auto count = ::sendto(this->handle_, buf, len, flags, &address.ai_addr,
-                          address.ai_addrlen);
-    if (count < 0) {
-      auto error = utils::Exception::getLastFailureCode();
-      if (isCodeEWouldBlock(error)) {
-        return -1;
-      }
-      throw utils::Exception(error);
-    }
-    return count;
-  }
-
-  /**
-   *
-   * @param how
-   * @throw utils::Exception
+   * Shuts down all or part of the connection open on the socket.
+   * @param how Determines what to shut down:
+   *  SHUT_RD   = No more receptions;
+   *  SHUT_WR   = No more transmissions;
+   *  SHUT_RDWR = No more receptions or transmissions.
+   * @throw utils::Exception Thrown if the operation failed
    * @see ::shutdown
    */
   void shutdown(int how) {
     this->checkState();
     if ((::shutdown(this->handle_, how)) != 0) {
-      throw utils::Exception::fromLastFailure();
+      throw utils::Exception::fromLastError();
     }
   }
 
@@ -467,67 +478,70 @@ public:
 };
 
 /**
- *
+ * Utility class for creating sockets.
  */
 class SocketFactory {
 protected:
   /**
-   *
-   * @param ai_family
-   * @param ai_socktype
-   * @param ai_protocol
-   * @param ai_flags
-   * @param name
-   * @param service
-   * @return
+   * Allocates an addrinfo list with the given hints.
+   * @param family_hint Address family hint
+   * @param socktype_hint Socket type hint
+   * @param protocol_hint Protocol hint
+   * @param flags_hint Flags hint
+   * @param name Hostname for the addresses
+   * @param service Service/port for the addresses
+   * @return The linked list of addresses
+   * @throw utils::AddressInfoException Thrown if the operation failed
+   * @see ::getaddrinfo
    */
-  static addrinfo *getAddrinfo(int ai_family, int ai_socktype, int ai_protocol, int ai_flags,
-                               const char *name,
-                               const char *service) {
+  static addrinfo *getaddrinfo(int family_hint, int socktype_hint, int protocol_hint,
+                               int flags_hint, const char *name, const char *service) {
     addrinfo hints{}, *info = nullptr;
     memset(&hints, 0, sizeof(addrinfo));
-    hints.ai_family = ai_family;
-    hints.ai_socktype = ai_socktype;
-    hints.ai_protocol = ai_protocol;
-    hints.ai_flags = ai_flags;
-    int code = getaddrinfo(name, service, &hints, &info) != 0;
-    if (code != 0) {
-      throw utils::AddressInfoException(code);
+    hints.ai_family = family_hint;
+    hints.ai_socktype = socktype_hint;
+    hints.ai_protocol = protocol_hint;
+    hints.ai_flags = flags_hint;
+    int error = ::getaddrinfo(name, service, &hints, &info);
+    if (error != 0) {
+      throw utils::AddressInfoException(error);
     }
     return info;
   }
 
 public:
   /**
-   *
-   * @param ai_family
-   * @param ai_socktype
-   * @param ai_protocol
-   * @param name
-   * @param service
-   * @param non_blocking
-   * @param reuse
-   * @return
+   * Creates a bound socket.
+   * @param family_hint Address family hint
+   * @param socktype_hint Socket type hint
+   * @param protocol_hint Protocol hint
+   * @param name Hostname for the addresses
+   * @param service Service/port for the addresses
+   * @param non_blocking Defines if the socket should be asynchronous (false by default)
+   * @param reuse Defines if the socket should reuse a previously bound address
+   * @return The socket
    */
-  static std::unique_ptr<Socket> boundSocket(int ai_family, int ai_socktype, int ai_protocol,
+  static std::unique_ptr<Socket> boundSocket(int family_hint, int socktype_hint, int protocol_hint,
                                              const char *name, const char *service,
                                              bool non_blocking = false, bool reuse = false) {
-    auto info = SocketFactory::getAddrinfo(ai_family, ai_socktype, ai_protocol, AI_PASSIVE, name,
+    auto info = SocketFactory::getaddrinfo(family_hint, socktype_hint, protocol_hint, AI_PASSIVE,
+                                           name,
                                            service);
 
     std::unique_ptr<Socket> sock;
     std::unique_ptr<utils::Exception> error;
+    // Tries the addresses until one is bound successfully.
     for (auto addr = info; addr != nullptr; addr = addr->ai_next) {
       auto address = std::make_unique<SocketAddress>(addr);
       try {
         sock = std::make_unique<Socket>(std::move(address));
-        if (non_blocking) {
-          sock->setNonBlocking();
-        }
         if (reuse) {
           sock->setsockopt(SOL_SOCKET, SO_REUSEADDR, 1);
         }
         sock->bind();
+        if (non_blocking) {
+          sock->setNonBlocking();
+        }
       } catch (utils::Exception &e) {
         error = std::make_unique<utils::Exception>(std::move(e));
         sock.reset();
@@ -547,28 +561,31 @@ public:
   }
 
   /**
-   *
-   * @param ai_socktype
-   * @param ai_protocol
-   * @param name
-   * @param service
-   * @param non_blocking
-   * @return
+   * Creates a connected socket.
+   * @param socktype_hint Socket type hint
+   * @param protocol_hint Protocol hint
+   * @param name Hostname for the addresses
+   * @param service Service/port for the addresses
+   * @param non_blocking Defines if the socket should be asynchronous (false by default)
+   * @return The socket
    */
-  static std::unique_ptr<Socket> connectedSocket(int ai_socktype, int ai_protocol, const char *name,
+  static std::unique_ptr<Socket> connectedSocket(int socktype_hint, int protocol_hint,
+                                                 const char *name,
                                                  const char *service, bool non_blocking = false) {
-    auto info = SocketFactory::getAddrinfo(AF_UNSPEC, ai_socktype, ai_protocol, 0, name, service);
+    auto info = SocketFactory::getaddrinfo(AF_UNSPEC, socktype_hint, protocol_hint, 0, name,
+                                           service);
 
     std::unique_ptr<Socket> sock;
     std::unique_ptr<utils::Exception> error;
+    // Tries the addresses until one is connected successfully.
     for (auto addr = info; addr != nullptr; addr = addr->ai_next) {
       auto address = std::make_unique<SocketAddress>(addr);
       try {
         sock = std::make_unique<Socket>(std::move(address));
+        sock->connect();
         if (non_blocking) {
           sock->setNonBlocking();
         }
-        sock->connect();
       } catch (utils::Exception &e) {
         error = std::make_unique<utils::Exception>(std::move(e));
         sock.reset();
@@ -589,7 +606,7 @@ public:
 };
 
 /**
- *
+ * Utility class that automatically initializes and cleans the OS' socket API.
  */
 class SocketInitializer {
 protected:

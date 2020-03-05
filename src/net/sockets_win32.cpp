@@ -3,12 +3,12 @@
 #pragma comment(lib, "Ws2_32.lib")
 
 namespace net {
-bool Socket::isCodeEWouldBlock(long int code) {
-  return code == WSAEWOULDBLOCK;
+bool Socket::isErrorEWouldBlock(long int error) {
+  return error == WSAEWOULDBLOCK;
 }
 
-bool Socket::isCodeEInProgress(long int code) {
-  return code == WSAEWOULDBLOCK;
+bool Socket::isErrorEInProgress(long int error) {
+  return error == WSAEWOULDBLOCK;
 }
 
 void Socket::close() {
@@ -19,7 +19,7 @@ void Socket::close() {
 void Socket::setNonBlocking() {
   u_long mode = 1;
   if (ioctlsocket(this->handle_, FIONBIO, &mode) != 0) {
-    throw utils::Exception::fromLastFailure();
+    throw utils::Exception::fromLastError();
   }
 }
 
@@ -33,8 +33,8 @@ std::unique_ptr<Socket> Socket::accept(bool non_blocking_accepted) const {
   socket_handle_t client_socket =
     ::accept(this->handle_, client_sock_address, &client_sock_address_len);
   if (client_socket == INVALID_SOCKET_HANDLE) {
-    auto error = utils::Exception::getLastFailureCode();
-    if (isCodeEWouldBlock(error)) {
+    auto error = utils::Exception::getLastError();
+    if (Socket::isErrorEWouldBlock(error)) {
       return nullptr;
     }
     throw utils::Exception(error);
@@ -51,7 +51,7 @@ std::unique_ptr<Socket> Socket::accept(bool non_blocking_accepted) const {
 
 SocketInitializer::SocketInitializer() {
   if (WSAStartup(MAKEWORD(2, 2), &this->wsadata_) == SOCKET_ERROR) {
-    throw utils::Exception::fromLastFailure();
+    throw utils::Exception::fromLastError();
   }
 }
 

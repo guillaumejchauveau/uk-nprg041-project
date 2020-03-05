@@ -3,21 +3,21 @@
 #include <fcntl.h>
 
 namespace net {
-bool Socket::isCodeEWouldBlock(long int code) {
-  return code == EWOULDBLOCK || code == EAGAIN;
+bool Socket::isErrorEWouldBlock(long int error) {
+  return error == EWOULDBLOCK || error == EAGAIN;
 }
 
-bool Socket::isCodeEInProgress(long int code) {
-  return code == EINPROGRESS;
+bool Socket::isErrorEInProgress(long int error) {
+  return error == EINPROGRESS;
 }
 
 void Socket::setNonBlocking() {
   int flags = fcntl(this->handle_, F_GETFL, 0);
   if (flags < 0) {
-    throw utils::Exception::fromLastFailure();
+    throw utils::Exception::fromLastError();
   }
   if (fcntl(this->handle_, F_SETFL, flags | O_NONBLOCK) != 0) {
-    throw utils::Exception::fromLastFailure();
+    throw utils::Exception::fromLastError();
   }
 }
 
@@ -35,8 +35,8 @@ std::unique_ptr<Socket> Socket::accept(bool non_blocking_accepted) const {
   socket_handle_t client_socket =
     ::accept4(this->handle_, client_sock_address, &client_sock_address_len, flags);
   if (client_socket == INVALID_SOCKET_HANDLE) {
-    auto error = utils::Exception::getLastFailureCode();
-    if (isCodeEWouldBlock(error)) {
+    auto error = utils::Exception::getLastError();
+    if (Socket::isErrorEWouldBlock(error)) {
       return nullptr;
     }
     throw utils::Exception(error);

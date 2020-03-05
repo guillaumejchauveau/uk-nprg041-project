@@ -9,7 +9,7 @@ TCPServer::TCPServer(std::unique_ptr<Socket> &&socket) : socket_(std::move(socke
   this->listening_ = false;
   this->epollfd_ = ::epoll_create1(0);
   if (this->epollfd_ == -1) {
-    throw utils::Exception::fromLastFailure();
+    throw utils::Exception::fromLastError();
   }
 }
 
@@ -40,7 +40,7 @@ void TCPServer::listen(int max) {
   connection.events = EPOLLIN;
   connection.data.fd = this->socket_->getHandle();
   if (::epoll_ctl(this->epollfd_, EPOLL_CTL_ADD, connection.data.fd, &connection) != 0) {
-    throw utils::Exception::fromLastFailure();
+    throw utils::Exception::fromLastError();
   }
 }
 
@@ -52,7 +52,7 @@ void TCPServer::run() {
   while (true) {
     ready_count = ::epoll_wait(this->epollfd_, ready, TCPServer::MAX_EVENT, -1);
     if (ready_count < 0) {
-      throw utils::Exception::fromLastFailure();
+      throw utils::Exception::fromLastError();
     }
     for (int i = 0; i < ready_count; i++) {
       event_fd = ready[i].data.fd;
@@ -64,7 +64,7 @@ void TCPServer::run() {
         event.events = TCP_CLIENT_EVENTS;
         event.data.fd = client->getHandle();
         if (::epoll_ctl(this->epollfd_, EPOLL_CTL_ADD, client->getHandle(), &event) != 0) {
-          throw utils::Exception::fromLastFailure();
+          throw utils::Exception::fromLastError();
         }
         this->addClient(std::move(client));
       } else { // A connected client changed state.
@@ -76,7 +76,7 @@ void TCPServer::run() {
 
         if ((ready[i].events & EPOLLRDHUP) == EPOLLRDHUP) { // Client has disconnected.
           if (::epoll_ctl(this->epollfd_, EPOLL_CTL_DEL, event_fd, nullptr) != 0) {
-            throw utils::Exception::fromLastFailure();
+            throw utils::Exception::fromLastError();
           }
           this->removeClient(event_fd);
           client.reset();
@@ -89,7 +89,7 @@ void TCPServer::run() {
         event.events = TCP_CLIENT_EVENTS;
         event.data.fd = event_fd;
         if (::epoll_ctl(this->epollfd_, EPOLL_CTL_MOD, event_fd, &event) != 0) {
-          throw utils::Exception::fromLastFailure();
+          throw utils::Exception::fromLastError();
         }
       }
     }

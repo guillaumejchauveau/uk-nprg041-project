@@ -34,25 +34,25 @@ struct LocalFreeHelper {
 #endif
 
 /**
- *
+ * Base exception class that gets its message from the error code.
  */
 class Exception : public std::exception {
 protected:
-  long int code;
+  long int error;
 
 public:
   /**
-   * @param code The return code of the function that failed
+   * @param error The return code of the function that failed
    */
-  explicit Exception(long int code) : exception() {
-    this->code = code;
+  explicit Exception(long int error) : exception() {
+    this->error = error;
   }
 
   /**
-   *
-   * @return
+   * Platform-dependent function that retrieves the last error code.
+   * @return The last error
    */
-  static long int getLastFailureCode() {
+  static long int getLastError() {
 #if defined(_WIN32)
     return ::GetLastError();
 #else
@@ -61,24 +61,22 @@ public:
   }
 
   /**
-   *
-   * @return
+   * Creates a new instance using the last error.
    */
-  static Exception fromLastFailure() {
-    return Exception(Exception::getLastFailureCode());
+  static Exception fromLastError() {
+    return Exception(Exception::getLastError());
   }
 
   /**
-   *
-   * @return
+   * @return The error related to the exception
    */
-  long int getResult() const {
-    return this->code;
+  long int getError() const {
+    return this->error;
   }
 
   /**
-   *
-   * @return
+   * Allocates a string for the message corresponding to the error.
+   * @return The string container
    */
   virtual std::string getMessage() const {
 #if defined(_WIN32)
@@ -86,7 +84,7 @@ public:
     LPWSTR buffPtr;
     FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
                   FORMAT_MESSAGE_IGNORE_INSERTS,
-                  nullptr, static_cast<DWORD>(this->getResult()),
+                  nullptr, static_cast<DWORD>(this->getError()),
                   MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
                   reinterpret_cast<LPSTR>(&buffPtr), 0, nullptr);
     buff.reset(buffPtr);
@@ -94,7 +92,7 @@ public:
 #else
     std::string buff;
     buff.resize(64);
-    auto result = strerror_r(static_cast<int>(this->getResult()), &buff.front(), buff.size());
+    auto result = strerror_r(static_cast<int>(this->getError()), &buff.front(), buff.size());
     buff.resize(buff.find((char) 0));
     if (buff.empty()) {
       buff = result;
@@ -117,16 +115,15 @@ public:
 };
 
 /**
- *
+ * Extension of base exception for address info errors handling on linux.
  */
 class AddressInfoException : public Exception {
   static std::mutex lock;
 public:
   /**
-   *
-   * @param result
+   * @see Exception(int)
    */
-  explicit AddressInfoException(int result) : Exception(result) {
+  explicit AddressInfoException(int error) : Exception(error) {
   }
 
 #if !defined(_WIN32) // Linux only
@@ -134,14 +131,14 @@ public:
   std::string getMessage() const override {
     // gai_strerror is not thread safe.
     std::lock_guard<std::mutex> g(AddressInfoException::lock);
-    return gai_strerror(static_cast<int>(this->getResult()));
+    return gai_strerror(static_cast<int>(this->getError()));
   }
 
 #endif
 };
 
 /**
- *
+ * Exception with a string message.
  */
 class MessageException : public std::exception {
 protected:
