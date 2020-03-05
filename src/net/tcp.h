@@ -9,47 +9,54 @@
 
 namespace net {
 /**
- *
+ * Abstract TCP server class. Can be extended to process incoming data from one client.
+ * The server keeps a list of the connected clients' sockets. Only one request from a given client
+ * can be processed at the same time, even across threads.
  */
 class TCPServer {
 protected:
   std::unique_ptr<Socket> socket_{};
-  std::map<int, utils::UniqueLocker<Socket>> clients_{};
+  std::map<socket_handle_t, utils::UniqueLocker<Socket>> clients_{};
   std::mutex clients_lock_;
-  bool listening_;
+  bool initialized_;
 
 #if defined(_WIN32)
 #else
-  int epollfd_;
+  int epoll_fd_;
+  /**
+   * Maximum number of epoll events that will be processed by a thread at the same time.
+   */
   const int MAX_EVENT = 10;
 #endif
 
   /**
-   *
-   * @param client
+   * Adds a client the server's list.
+   * @param client The client's socket
    */
   void addClient(std::unique_ptr<Socket> &&client) {
     this->clients_lock_.lock();
-    auto handle = client->getHandle();
-    this->clients_.emplace(handle, std::move(client));
+    auto id = client->getHandle();
+    this->clients_.emplace(id, std::move(client));
     this->clients_lock_.unlock();
   }
 
   /**
-   *
-   * @param fd
-   * @return
+   * Takes ownership of the client.
+   * Behavior is undefined if called in the thread already owning the data.
+   * @param id The identifier of the client
+   * @return The client
    */
-  std::unique_ptr<Socket> takeClient(int fd) {
+  std::unique_ptr<Socket> takeClient(socket_handle_t id) {
     this->clients_lock_.lock();
-    auto &locker = this->clients_[fd];
+    auto &locker = this->clients_[id];
     this->clients_lock_.unlock();
     return locker.try_take();
   }
 
   /**
-   *
-   * @param client
+   * Yields ownership of the client.
+   * Behavior is undefined if called without ownership.
+   * @param client The client
    */
   void yieldClient(std::unique_ptr<Socket> &&client) {
     this->clients_lock_.lock();
@@ -59,63 +66,50 @@ protected:
   }
 
   /**
+   * Removes a client from the server's list.
    * Behavior is undefined if called without ownership.
-   * @param fd
+   * @param id The identifier of the client
    */
-  void removeClient(int fd) {
+  void removeClient(socket_handle_t id) {
     this->clients_lock_.lock();
-    this->clients_[fd].reset();
-    this->clients_.erase(fd);
+    this->clients_[id].reset();
+    this->clients_.erase(id);
     this->clients_lock_.unlock();
   }
 
   /**
-   *
-   * @param client
-   * @return
+   * Method called by the server when a client makes a request.
+   * @param client The client who made the request
+   * @return The client. Must be returned to yield ownership
    */
   virtual std::unique_ptr<Socket> &&processClient(std::unique_ptr<Socket> &&client) = 0;
 
 public:
   /**
-   *
-   * @param socket
+   * Creates a server given a socket.
+   * @param socket The socket for the server
    */
   explicit TCPServer(std::unique_ptr<Socket> &&socket);
   /**
-   *
-   * @param tcp_server
+   * Prevents copy of the server.
    */
   TCPServer(const TCPServer &tcp_server) = delete;
-  /**
-   *
-   * @param tcp_server
-   */
   TCPServer(TCPServer &&tcp_server) noexcept;
   /**
-   *
-   * @param tcp_server
-   * @return
+   * Prevents copy of the server.
    */
   TCPServer &operator=(const TCPServer &tcp_server) = delete;
-  /**
-   *
-   * @param tcp_server
-   * @return
-   */
   TCPServer &operator=(TCPServer &&tcp_server) noexcept;
-  /**
-   *
-   */
   virtual ~TCPServer() = default;
 
   /**
-   *
-   * @param max
+   * Initializes the server.
+   * @param max Maximum number of pending connection requests to the socket
    */
-  void listen(int max = SOMAXCONN);
+  void initialize(int max = SOMAXCONN);
   /**
-   *
+   * Starts processing requests.
+   * Can be invoked with a thread.
    */
   void run();
 };

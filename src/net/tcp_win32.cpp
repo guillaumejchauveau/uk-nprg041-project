@@ -17,7 +17,7 @@ TCPServer &TCPServer::operator=(TCPServer &&tcp_server) noexcept {
   return *this;
 }
 
-void TCPServer::listen(int max) {
+void TCPServer::initialize(int max) {
 
 }
 

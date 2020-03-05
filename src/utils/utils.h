@@ -90,6 +90,7 @@ public:
   /**
    * Tries to take ownership of the data. An empty unique pointer is returned if
    * the data is out of the locker.
+   * Behavior is undefined if called in the thread already owning the data.
    * @return The data or an empty pointer
    */
   std::unique_ptr<T> try_take() {

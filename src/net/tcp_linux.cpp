@@ -6,51 +6,54 @@
 
 namespace net {
 TCPServer::TCPServer(std::unique_ptr<Socket> &&socket) : socket_(std::move(socket)) {
-  this->listening_ = false;
-  this->epollfd_ = ::epoll_create1(0);
-  if (this->epollfd_ == -1) {
+  this->initialized_ = false;
+  this->epoll_fd_ = ::epoll_create1(0);
+  if (this->epoll_fd_ == -1) {
     throw utils::Exception::fromLastError();
   }
 }
 
 TCPServer::TCPServer(TCPServer &&tcp_server) noexcept : socket_(std::move(tcp_server.socket_)) {
-  this->listening_ = tcp_server.listening_;
-  this->epollfd_ = tcp_server.epollfd_;
-  tcp_server.epollfd_ = -1;
+  this->initialized_ = tcp_server.initialized_;
+  this->epoll_fd_ = tcp_server.epoll_fd_;
+  tcp_server.epoll_fd_ = -1;
 }
 
 TCPServer &TCPServer::operator=(TCPServer &&tcp_server) noexcept {
   if (this == &tcp_server) {
     return *this;
   }
-  this->listening_ = tcp_server.listening_;
+  this->initialized_ = tcp_server.initialized_;
   this->socket_ = std::move(tcp_server.socket_);
-  this->epollfd_ = tcp_server.epollfd_;
-  tcp_server.epollfd_ = -1;
+  this->epoll_fd_ = tcp_server.epoll_fd_;
+  tcp_server.epoll_fd_ = -1;
   return *this;
 }
 
-void TCPServer::listen(int max) {
-  if (this->listening_) {
-    throw utils::MessageException("Server already listening");
+void TCPServer::initialize(int max) {
+  if (this->initialized_) {
+    throw utils::MessageException("Server already initialized");
   }
-  this->listening_ = true;
+  this->initialized_ = true;
   this->socket_->listen(max);
   epoll_event connection{};
   connection.events = EPOLLIN;
   connection.data.fd = this->socket_->getHandle();
-  if (::epoll_ctl(this->epollfd_, EPOLL_CTL_ADD, connection.data.fd, &connection) != 0) {
+  if (::epoll_ctl(this->epoll_fd_, EPOLL_CTL_ADD, connection.data.fd, &connection) != 0) {
     throw utils::Exception::fromLastError();
   }
 }
 
 void TCPServer::run() {
+  if (!this->initialized_) {
+    throw utils::MessageException("Server already listening");
+  }
   epoll_event event{}, ready[TCPServer::MAX_EVENT];
   int ready_count, event_fd;
   std::unique_ptr<Socket> client;
 
   while (true) {
-    ready_count = ::epoll_wait(this->epollfd_, ready, TCPServer::MAX_EVENT, -1);
+    ready_count = ::epoll_wait(this->epoll_fd_, ready, TCPServer::MAX_EVENT, -1);
     if (ready_count < 0) {
       throw utils::Exception::fromLastError();
     }
@@ -63,7 +66,7 @@ void TCPServer::run() {
         }
         event.events = TCP_CLIENT_EVENTS;
         event.data.fd = client->getHandle();
-        if (::epoll_ctl(this->epollfd_, EPOLL_CTL_ADD, client->getHandle(), &event) != 0) {
+        if (::epoll_ctl(this->epoll_fd_, EPOLL_CTL_ADD, client->getHandle(), &event) != 0) {
           throw utils::Exception::fromLastError();
         }
         this->addClient(std::move(client));
@@ -75,7 +78,7 @@ void TCPServer::run() {
         client = this->processClient(std::move(client)); // Processes the client's data.
 
         if ((ready[i].events & EPOLLRDHUP) == EPOLLRDHUP) { // Client has disconnected.
-          if (::epoll_ctl(this->epollfd_, EPOLL_CTL_DEL, event_fd, nullptr) != 0) {
+          if (::epoll_ctl(this->epoll_fd_, EPOLL_CTL_DEL, event_fd, nullptr) != 0) {
             throw utils::Exception::fromLastError();
           }
           this->removeClient(event_fd);
@@ -88,7 +91,7 @@ void TCPServer::run() {
         // Re-arms the client after EPOLLONESHOT.
         event.events = TCP_CLIENT_EVENTS;
         event.data.fd = event_fd;
-        if (::epoll_ctl(this->epollfd_, EPOLL_CTL_MOD, event_fd, &event) != 0) {
+        if (::epoll_ctl(this->epoll_fd_, EPOLL_CTL_MOD, event_fd, &event) != 0) {
           throw utils::Exception::fromLastError();
         }
       }
