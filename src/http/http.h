@@ -2,6 +2,7 @@
 #define _HTTP_H_
 
 #include "../net/tcp.h"
+#include <iostream>
 
 namespace http {
 class HTTPServer : public net::TCPServer {

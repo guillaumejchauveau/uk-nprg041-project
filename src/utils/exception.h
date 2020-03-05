@@ -23,11 +23,11 @@
 namespace utils {
 #if defined(_WIN32)
 /**
- *
+ * Utility for unique pointers.
  */
 struct LocalFreeHelper {
-  void operator()(void *toFree) const {
-    ::LocalFree(reinterpret_cast<HLOCAL>(toFree));
+  void operator()(void *to_free) const {
+    ::LocalFree(reinterpret_cast<HLOCAL>(to_free));
   };
 };
 #else
@@ -38,14 +38,14 @@ struct LocalFreeHelper {
  */
 class Exception : public std::exception {
 protected:
-  long int error;
+  long int error_;
 
 public:
   /**
    * @param error The return code of the function that failed
    */
   explicit Exception(long int error) : exception() {
-    this->error = error;
+    this->error_ = error;
   }
 
   /**
@@ -71,7 +71,7 @@ public:
    * @return The error related to the exception
    */
   long int getError() const {
-    return this->error;
+    return this->error_;
   }
 
   /**
@@ -118,7 +118,8 @@ public:
  * Extension of base exception for address info errors handling on linux.
  */
 class AddressInfoException : public Exception {
-  static std::mutex lock;
+protected:
+  static std::mutex lock_;
 public:
   /**
    * @see Exception(int)
@@ -130,7 +131,7 @@ public:
 
   std::string getMessage() const override {
     // gai_strerror is not thread safe.
-    std::lock_guard<std::mutex> g(AddressInfoException::lock);
+    std::lock_guard<std::mutex> g(AddressInfoException::lock_);
     return gai_strerror(static_cast<int>(this->getError()));
   }
 

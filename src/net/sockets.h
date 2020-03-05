@@ -81,6 +81,9 @@ struct SocketAddress {
   }
 
   SocketAddress &operator=(const SocketAddress &socket_address) {
+    if (this == &socket_address) {
+      return *this;
+    }
     this->ai_family = socket_address.ai_family;
     this->ai_socktype = socket_address.ai_socktype;
     this->ai_protocol = socket_address.ai_protocol;
@@ -100,6 +103,8 @@ struct SocketAddress {
     this->ai_addr = socket_address.ai_addr;
     return *this;
   }
+
+  ~SocketAddress() = default;
 
   /**
    * Retrieves the host name corresponding to the address.
@@ -236,13 +241,6 @@ public:
   }
 
   /**
-   * Closes the socket before destructing the wrapper.
-   */
-  ~Socket() {
-    this->close();
-  }
-
-  /**
    * Prevents the copy of a wrapper instance.
    */
   Socket &operator=(const Socket &socket) = delete;
@@ -256,6 +254,13 @@ public:
     this->address_ = std::move(socket.address_);
     this->last_error_ = socket.last_error_;
     return *this;
+  }
+
+  /**
+   * Closes the socket before destructing the wrapper.
+   */
+  ~Socket() {
+    this->close();
   }
 
   /**
@@ -615,6 +620,10 @@ protected:
 #endif
 public:
   SocketInitializer();
+  SocketInitializer(const SocketInitializer &other) = delete;
+  SocketInitializer(SocketInitializer &&other) = delete;
+  SocketInitializer &operator=(const SocketInitializer &other) = delete;
+  SocketInitializer &operator=(SocketInitializer &&other) = delete;
   ~SocketInitializer();
 };
 } // namespace net

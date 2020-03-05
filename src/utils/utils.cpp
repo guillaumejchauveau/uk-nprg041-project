@@ -1,4 +1,4 @@
 #include "utils.h"
 #include "exception.h"
 
-std::mutex utils::AddressInfoException::lock;
+std::mutex utils::AddressInfoException::lock_;

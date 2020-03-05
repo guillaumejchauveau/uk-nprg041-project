@@ -5,7 +5,6 @@
 #include "../utils/exception.h"
 #include <map>
 #include <mutex>
-#include <iostream>
 
 namespace net {
 /**
