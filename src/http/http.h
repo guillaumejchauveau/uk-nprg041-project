@@ -1,10 +1,22 @@
-#ifndef _HTTP_H_
-#define _HTTP_H_
+#ifndef HTTP_HTTP_H
+#define HTTP_HTTP_H
 
+#include "message.h"
 #include "../net/tcp.h"
 #include <iostream>
 
 namespace http {
+class IRequestHandler {
+public:
+  virtual const Response handle(const ServerRequest &request) const = 0;
+};
+
+class IMiddleware {
+public:
+  virtual const Response process(const ServerRequest &request,
+                                 const IRequestHandler &handler) const = 0;
+};
+
 class HTTPServer : public net::TCPServer {
 public:
   explicit HTTPServer(std::unique_ptr<net::Socket> &&socket) : TCPServer(std::move(socket)) {
@@ -35,4 +47,4 @@ public:
 };
 } // namespace http
 
-#endif //_HTTP_H_
+#endif //HTTP_HTTP_H
