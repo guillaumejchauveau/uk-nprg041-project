@@ -314,7 +314,7 @@ public:
     if ((::getsockopt(this->handle_, level, option_name,
                       reinterpret_cast<char *>(option_value),
                       reinterpret_cast<socklen_t *>(&option_len))) != 0) {
-      throw utils::Exception::fromLastError();
+      throw utils::SystemException::fromLastError();
     }
     return std::unique_ptr<T>(option_value);
   }
@@ -335,7 +335,7 @@ public:
     // Option value reinterpreted for WinSock.
     if ((::setsockopt(this->handle_, level, option_name,
                       reinterpret_cast<char *>(option_value), option_len)) != 0) {
-      throw utils::Exception::fromLastError();
+      throw utils::SystemException::fromLastError();
     }
   }
 
@@ -355,7 +355,7 @@ public:
     // Option value reinterpreted for WinSock.
     if ((::setsockopt(this->handle_, level, option_name,
                       reinterpret_cast<char *>(&option_value), option_len)) != 0) {
-      throw utils::Exception::fromLastError();
+      throw utils::SystemException::fromLastError();
     }
   }
 
@@ -368,7 +368,7 @@ public:
     this->checkState();
     if ((::bind(this->handle_, &this->address_->ai_addr,
                 this->address_->ai_addrlen)) != 0) {
-      throw utils::Exception::fromLastError();
+      throw utils::SystemException::fromLastError();
     }
   }
 
@@ -381,11 +381,11 @@ public:
     this->checkState();
     if ((::connect(this->handle_, &this->address_->ai_addr,
                    this->address_->ai_addrlen)) != 0) {
-      auto error = utils::Exception::getLastError();
+      auto error = utils::SystemException::getLastError();
       if (Socket::isErrorEInProgress(error)) {
         return;
       }
-      throw utils::Exception(error);
+      throw utils::SystemException(error);
     }
   }
 
@@ -398,7 +398,7 @@ public:
   void listen(int max = SOMAXCONN) {
     this->checkState();
     if ((::listen(this->handle_, max)) != 0) {
-      throw utils::Exception::fromLastError();
+      throw utils::SystemException::fromLastError();
     }
   }
 
@@ -425,11 +425,11 @@ public:
     this->checkState();
     auto count = ::recv(this->handle_, buf, len, flags);
     if (count < 0) {
-      auto error = utils::Exception::getLastError();
+      auto error = utils::SystemException::getLastError();
       if (Socket::isErrorEWouldBlock(error)) {
         return -1;
       }
-      throw utils::Exception(error);
+      throw utils::SystemException(error);
     }
     return count;
   }
@@ -448,11 +448,11 @@ public:
     this->checkState();
     auto count = ::send(this->handle_, buf, len, flags);
     if (count < 0) {
-      auto error = utils::Exception::getLastError();
+      auto error = utils::SystemException::getLastError();
       if (Socket::isErrorEWouldBlock(error)) {
         return -1;
       }
-      throw utils::Exception(error);
+      throw utils::SystemException(error);
     }
     return count;
   }
@@ -469,7 +469,7 @@ public:
   void shutdown(int how) {
     this->checkState();
     if ((::shutdown(this->handle_, how)) != 0) {
-      throw utils::Exception::fromLastError();
+      throw utils::SystemException::fromLastError();
     }
   }
 
@@ -534,7 +534,7 @@ public:
                                            service);
 
     std::unique_ptr<Socket> sock;
-    std::unique_ptr<utils::Exception> error;
+    std::unique_ptr<utils::SystemException> error;
     // Tries the addresses until one is bound successfully.
     for (auto addr = info; addr != nullptr; addr = addr->ai_next) {
       auto address = std::make_unique<SocketAddress>(addr);
@@ -547,8 +547,8 @@ public:
         if (non_blocking) {
           sock->setNonBlocking();
         }
-      } catch (utils::Exception &e) {
-        error = std::make_unique<utils::Exception>(std::move(e));
+      } catch (utils::SystemException &e) {
+        error = std::make_unique<utils::SystemException>(std::move(e));
         sock.reset();
         continue;
       }
@@ -560,7 +560,7 @@ public:
       if (error) {
         message = error->getMessage();
       }
-      throw utils::MessageException("Cannot create bound socket: %s", message.c_str());
+      throw utils::RuntimeException("Cannot create bound socket: %s", message.c_str());
     }
     return sock;
   }
@@ -581,7 +581,7 @@ public:
                                            service);
 
     std::unique_ptr<Socket> sock;
-    std::unique_ptr<utils::Exception> error;
+    std::unique_ptr<utils::SystemException> error;
     // Tries the addresses until one is connected successfully.
     for (auto addr = info; addr != nullptr; addr = addr->ai_next) {
       auto address = std::make_unique<SocketAddress>(addr);
@@ -591,8 +591,8 @@ public:
         if (non_blocking) {
           sock->setNonBlocking();
         }
-      } catch (utils::Exception &e) {
-        error = std::make_unique<utils::Exception>(std::move(e));
+      } catch (utils::SystemException &e) {
+        error = std::make_unique<utils::SystemException>(std::move(e));
         sock.reset();
         continue;
       }
@@ -604,7 +604,7 @@ public:
       if (error) {
         message = error->getMessage();
       }
-      throw utils::MessageException("Cannot create connected socket: %s", message.c_str());
+      throw utils::RuntimeException("Cannot create connected socket: %s", message.c_str());
     }
     return sock;
   }

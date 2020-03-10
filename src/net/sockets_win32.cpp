@@ -19,7 +19,7 @@ void Socket::close() {
 void Socket::setNonBlocking() {
   u_long mode = 1;
   if (ioctlsocket(this->handle_, FIONBIO, &mode) != 0) {
-    throw utils::Exception::fromLastError();
+    throw utils::SystemException::fromLastError();
   }
 }
 
@@ -33,11 +33,11 @@ std::unique_ptr<Socket> Socket::accept(bool non_blocking_accepted) const {
   socket_handle_t client_socket =
     ::accept(this->handle_, client_sock_address, &client_sock_address_len);
   if (client_socket == INVALID_SOCKET_HANDLE) {
-    auto error = utils::Exception::getLastError();
+    auto error = utils::SystemException::getLastError();
     if (Socket::isErrorEWouldBlock(error)) {
       return nullptr;
     }
-    throw utils::Exception(error);
+    throw utils::SystemException(error);
   }
   auto socket_address = std::make_unique<SocketAddress>(client_sock_address,
                                                         client_sock_address_len);
@@ -51,7 +51,7 @@ std::unique_ptr<Socket> Socket::accept(bool non_blocking_accepted) const {
 
 SocketInitializer::SocketInitializer() {
   if (WSAStartup(MAKEWORD(2, 2), &this->wsadata_) == SOCKET_ERROR) {
-    throw utils::Exception::fromLastError();
+    throw utils::SystemException::fromLastError();
   }
 }
 

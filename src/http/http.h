@@ -1,7 +1,7 @@
 #ifndef HTTP_HTTP_H
 #define HTTP_HTTP_H
 
-#include "message.h"
+#include "messages.h"
 #include "../net/tcp.h"
 #include <iostream>
 
@@ -27,7 +27,10 @@ public:
     long read = 0;
     std::cout << "Receiving" << std::endl;
     while ((read = client->recv(buf, 19)) > 0) {
+      buf[read] = 0;
+      std::cout << buf;
     }
+    std::cout << read << std::endl;
     std::ostringstream res;
     res << "HTTP/1.1 200 OK" << std::endl;
     res << "Content-Length: 5" << std::endl;

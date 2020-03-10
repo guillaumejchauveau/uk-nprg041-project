@@ -34,9 +34,35 @@ struct LocalFreeHelper {
 #endif
 
 /**
- * Base exception class that gets its message from the error code.
+ * Exception with a string message.
  */
-class Exception : public std::exception {
+class RuntimeException : public std::runtime_error {
+public:
+  /**
+   * Creates an instance using printf-style formatting.
+   *
+   * @tparam Args Parameter pack type for the format arguments
+   * @param format The base format string
+   * @param args Additional arguments for formatting
+   * @see ::printf
+   */
+  template<typename ... Args>
+  explicit RuntimeException(const std::string &format, Args ... args) : runtime_error("") {
+    auto size = static_cast<size_t>(snprintf(nullptr, 0, format.c_str(), args ...)) + 1;
+    if (size <= 0) {
+      throw std::runtime_error("Error during formatting.");
+    }
+    std::string message;
+    message.resize(size);
+    snprintf(&message.front(), size, format.c_str(), args ...);
+    runtime_error::operator=(runtime_error(message));
+  }
+};
+
+/**
+ * Exception class that gets its message from the error code.
+ */
+class SystemException : public RuntimeException {
 protected:
   long int error_;
 
@@ -44,7 +70,7 @@ public:
   /**
    * @param error The return code of the function that failed
    */
-  explicit Exception(long int error) : exception() {
+  explicit SystemException(long int error) : RuntimeException("") {
     this->error_ = error;
   }
 
@@ -63,8 +89,8 @@ public:
   /**
    * Creates a new instance using the last error.
    */
-  static Exception fromLastError() {
-    return Exception(Exception::getLastError());
+  static SystemException fromLastError() {
+    return SystemException(SystemException::getLastError());
   }
 
   /**
@@ -117,14 +143,14 @@ public:
 /**
  * Extension of base exception for address info errors handling on linux.
  */
-class AddressInfoException : public Exception {
+class AddressInfoException : public SystemException {
 protected:
   static std::mutex lock_;
 public:
   /**
    * @see Exception(int)
    */
-  explicit AddressInfoException(int error) : Exception(error) {
+  explicit AddressInfoException(int error) : SystemException(error) {
   }
 
 #if !defined(_WIN32) // Linux only
@@ -136,36 +162,6 @@ public:
   }
 
 #endif
-};
-
-/**
- * Exception with a string message.
- */
-class MessageException : public std::exception {
-protected:
-  std::string message;
-public:
-  /**
-   * Creates an instance using printf-style formatting.
-   *
-   * @tparam Args Parameter pack type for the format arguments
-   * @param format The base format string
-   * @param args Additional arguments for formatting
-   * @see ::printf
-   */
-  template<typename ... Args>
-  explicit MessageException(const std::string &format, Args ... args) {
-    auto size = static_cast<size_t>(snprintf(nullptr, 0, format.c_str(), args ...)) + 1;
-    if (size <= 0) {
-      throw std::runtime_error("Error during formatting.");
-    }
-    this->message.resize(size);
-    snprintf(&this->message.front(), size, format.c_str(), args ...);
-  }
-
-  const char *what() const noexcept override {
-    return this->message.c_str();
-  }
 };
 } // namespace utils
 #endif //UTILS_EXCEPTION_H

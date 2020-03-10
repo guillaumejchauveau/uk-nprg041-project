@@ -1,7 +1,7 @@
-#ifndef HTTP_EXCEPTION_H
-#define HTTP_EXCEPTION_H
+#ifndef HTTP_EXCEPTIONS_H
+#define HTTP_EXCEPTIONS_H
 
-#include "message.h"
+#include "messages.h"
 #include <exception>
 
 namespace http {
@@ -27,4 +27,4 @@ public:
 
 } // namespace http
 
-#endif //HTTP_EXCEPTION_H
+#endif //HTTP_EXCEPTIONS_H

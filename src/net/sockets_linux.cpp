@@ -14,10 +14,10 @@ bool Socket::isErrorEInProgress(long int error) {
 void Socket::setNonBlocking() {
   int flags = fcntl(this->handle_, F_GETFL, 0);
   if (flags < 0) {
-    throw utils::Exception::fromLastError();
+    throw utils::SystemException::fromLastError();
   }
   if (fcntl(this->handle_, F_SETFL, flags | O_NONBLOCK) != 0) {
-    throw utils::Exception::fromLastError();
+    throw utils::SystemException::fromLastError();
   }
 }
 
@@ -35,11 +35,11 @@ std::unique_ptr<Socket> Socket::accept(bool non_blocking_accepted) const {
   socket_handle_t client_socket =
     ::accept4(this->handle_, client_sock_address, &client_sock_address_len, flags);
   if (client_socket == INVALID_SOCKET_HANDLE) {
-    auto error = utils::Exception::getLastError();
+    auto error = utils::SystemException::getLastError();
     if (Socket::isErrorEWouldBlock(error)) {
       return nullptr;
     }
-    throw utils::Exception(error);
+    throw utils::SystemException(error);
   }
   auto socket_address = std::make_unique<SocketAddress>(client_sock_address,
                                                         client_sock_address_len);

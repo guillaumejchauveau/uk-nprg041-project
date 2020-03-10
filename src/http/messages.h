@@ -1,29 +1,57 @@
-#ifndef HTTP_MESSAGE_H
-#define HTTP_MESSAGE_H
+#ifndef HTTP_MESSAGES_H
+#define HTTP_MESSAGES_H
 
 #include "uri.h"
+#include "../utils/exception.h"
 #include <any>
 #include <map>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace http {
 typedef std::vector<std::string> header_t;
 struct Message {
+protected:
+  std::string protocol_version_;
+  std::map<std::string, header_t> headers_;
+  std::stringstream data_;
+
 public:
-  const std::string getProtocolVersion() const;
-  const Message withProtocolVersion(const std::string &version) const;
+  enum STATE {
+    REQUEST_LINE,
+    HEADER_LINE,
+    BODY
+  };
+
+  const STATE getState() const {
+    return this->state_;
+  }
+
+  const std::string &getProtocolVersion() const;
+  Message &setProtocolVersion(const std::string &version);
   const std::map<std::string, header_t> &getHeaders() const;
   bool hasHeader(const std::string &name) const;
   const header_t &getHeader(const std::string &name) const;
   const std::string getHeaderLine(const std::string &name) const;
-  const Message withHeader(const std::string &name, const std::string &value) const;
-  const Message withHeader(const std::string &name, const header_t &value) const;
-  const Message withAddedHeader(const std::string &name, const std::string &value) const;
-  const Message withAddedHeader(const std::string &name, const header_t &value) const;
-  const Message withoutHeader(const std::string &name) const;
-  std::ostringstream getBody() const;
-  const Message withBody(std::ostringstream &body) const;
+  Message &setHeader(const std::string &name, const std::string &value);
+  Message &setHeader(const std::string &name, const header_t &value);
+  Message &setAddedHeader(const std::string &name, const std::string &value);
+  Message &setAddedHeader(const std::string &name, const header_t &value);
+  Message &setHeader(const std::string &name);
+  std::ios &getBody() const;
+
+  Message &setBody(std::stringstream &&body) {
+    if (this->getState() < BODY) {
+      throw utils::RuntimeException("Message is not ready for body manipulation");
+    }
+    this->data_ = std::move(body);
+  }
+
+protected:
+  STATE state_;
 };
 
 struct Request : public Message {
@@ -34,8 +62,38 @@ public:
       HEAD, GET, POST, PUT, PATCH, DELETE, PURGE, OPTIONS, TRACE, CONNECT
     };
 
+    Method(const METHOD &method) {
+      this->value_ = method;
+    }
+
+    Method(const std::string &method) {
+      if (method == "HEAD") {
+        this->value_ = METHOD::HEAD;
+      } else if (method == "GET") {
+        this->value_ = METHOD::GET;
+      } else if (method == "POST") {
+        this->value_ = METHOD::POST;
+      } else if (method == "PUT") {
+        this->value_ = METHOD::PUT;
+      } else if (method == "PATCH") {
+        this->value_ = METHOD::PATCH;
+      } else if (method == "DELETE") {
+        this->value_ = METHOD::DELETE;
+      } else if (method == "PURGE") {
+        this->value_ = METHOD::PURGE;
+      } else if (method == "OPTIONS") {
+        this->value_ = METHOD::OPTIONS;
+      } else if (method == "TRACE") {
+        this->value_ = METHOD::TRACE;
+      } else if (method == "CONNECT") {
+        this->value_ = METHOD::CONNECT;
+      } else {
+        throw std::invalid_argument("Invalid method");
+      }
+    }
+
     operator const char *() const {
-      switch (this->value) {
+      switch (this->value_) {
         case HEAD:
           return "HEAD";
         case GET:
@@ -60,23 +118,26 @@ public:
     }
 
   protected:
-    METHOD value;
+    METHOD value_;
   };
 
-  const std::string getRequestTarget() const;
-  const Request withRequestTarget(const std::string &requestTarget) const;
-  const Method getMethod() const;
-  const Request withMethod(const Method &method) const;
-  const Uri getUri() const;
-  const Request withUri(const Uri &uri, bool preserveHost = false) const;
+  std::istringstream &getBody() const;
+  Request &setProtocolVersion(const std::string &version);
+  const Method &getMethod() const;
+  Request &setMethod(const Method &method);
+  const Uri &getUri() const;
+  Request &setUri(const Uri &uri, bool preserveHost = false);
 };
 
 struct ServerRequest : public Request {
+protected:
 public:
+  ServerRequest &setMethod(const Method &method);
+  ServerRequest &setUri(const Uri &uri, bool preserveHost = false);
   std::map<std::string, std::any> &getAttributes();
   std::any getAttribute(const std::string &name, std::any default_value = nullptr);
-  const ServerRequest withAttribute(const std::string &name, std::any value) const;
-  const ServerRequest withoutAttribute(const std::string &name) const;
+  ServerRequest &setAttribute(const std::string &name, std::any value);
+  ServerRequest &setAttribute(const std::string &name);
 };
 
 struct Response : public Message {
@@ -157,11 +218,11 @@ public:
     };
 
     Status(const STATUS &status) {
-      this->value = status;
+      this->value_ = status;
     }
 
     operator const char *() const {
-      switch (this->value) {
+      switch (this->value_) {
         case CONTINUE:
           return "Continue";
         case SWITCHING_PROTOCOLS:
@@ -296,8 +357,10 @@ public:
     }
 
   protected:
-    STATUS value;
+    STATUS value_;
   };
+
+  std::ostringstream &getBody() const;
   int getStatusCode() const;
   const Response withStatus(int code, std::string reason_phrase = "") const;
   const std::string getReasonPhrase() const;
@@ -305,4 +368,4 @@ public:
 
 } // namespace http
 
-#endif //HTTP_MESSAGE_H
+#endif //HTTP_MESSAGES_H
