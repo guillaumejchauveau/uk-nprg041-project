@@ -5,7 +5,7 @@
 #define TCP_CLIENT_EVENTS (EPOLLIN | EPOLLRDHUP | EPOLLET | EPOLLONESHOT)
 
 namespace net {
-TCPServer::TCPServer(std::unique_ptr<Socket> &&socket) : socket_(std::move(socket)) {
+TCPServer::TCPServer(unique_ptr<Socket> &&socket) : socket_(move(socket)) {
   this->initialized_ = false;
   this->epoll_fd_ = ::epoll_create1(0);
   if (this->epoll_fd_ == -1) {
@@ -13,7 +13,7 @@ TCPServer::TCPServer(std::unique_ptr<Socket> &&socket) : socket_(std::move(socke
   }
 }
 
-TCPServer::TCPServer(TCPServer &&tcp_server) noexcept : socket_(std::move(tcp_server.socket_)) {
+TCPServer::TCPServer(TCPServer &&tcp_server) noexcept : socket_(move(tcp_server.socket_)) {
   this->initialized_ = tcp_server.initialized_;
   this->epoll_fd_ = tcp_server.epoll_fd_;
   tcp_server.epoll_fd_ = -1;
@@ -24,7 +24,7 @@ TCPServer &TCPServer::operator=(TCPServer &&tcp_server) noexcept {
     return *this;
   }
   this->initialized_ = tcp_server.initialized_;
-  this->socket_ = std::move(tcp_server.socket_);
+  this->socket_ = move(tcp_server.socket_);
   this->epoll_fd_ = tcp_server.epoll_fd_;
   tcp_server.epoll_fd_ = -1;
   return *this;
@@ -50,7 +50,7 @@ void TCPServer::run() {
   }
   epoll_event event{}, ready[TCPServer::MAX_EVENT];
   int ready_count, event_fd;
-  std::unique_ptr<Socket> client;
+  unique_ptr<Socket> client;
 
   while (true) {
     ready_count = ::epoll_wait(this->epoll_fd_, ready, TCPServer::MAX_EVENT, -1);
@@ -69,13 +69,13 @@ void TCPServer::run() {
         if (::epoll_ctl(this->epoll_fd_, EPOLL_CTL_ADD, client->getHandle(), &event) != 0) {
           throw utils::SystemException::fromLastError();
         }
-        this->addClient(std::move(client));
+        this->addClient(move(client));
       } else { // A connected client changed state.
         client = this->takeClient(event_fd); // Takes ownership of the client.
         if (!client) { // Client has been taken by another thread.
           continue;
         }
-        client = this->processClient(std::move(client)); // Processes the client's data.
+        client = this->processClient(move(client)); // Processes the client's data.
 
         if ((ready[i].events & EPOLLRDHUP) == EPOLLRDHUP) { // Client won't send anymore data.
           if (::epoll_ctl(this->epoll_fd_, EPOLL_CTL_DEL, event_fd, nullptr) != 0) {
@@ -86,7 +86,7 @@ void TCPServer::run() {
           continue;
         }
 
-        this->yieldClient(std::move(client));
+        this->yieldClient(move(client));
 
         // Re-arms the client after EPOLLONESHOT.
         event.events = TCP_CLIENT_EVENTS;

@@ -21,7 +21,7 @@ void Socket::setNonBlocking() {
   }
 }
 
-std::unique_ptr<Socket> Socket::accept(bool non_blocking_accepted) const {
+unique_ptr<Socket> Socket::accept(bool non_blocking_accepted) const {
   this->checkState();
   socklen_t client_sock_address_len = sizeof(sockaddr_storage);
   auto client_sock_address =
@@ -41,10 +41,10 @@ std::unique_ptr<Socket> Socket::accept(bool non_blocking_accepted) const {
     }
     throw utils::SystemException(error);
   }
-  auto socket_address = std::make_unique<SocketAddress>(client_sock_address,
-                                                        client_sock_address_len);
+  auto socket_address = make_unique<SocketAddress>(client_sock_address,
+                                                   client_sock_address_len);
   delete client_sock_address;
-  return std::make_unique<Socket>(client_socket, std::move(socket_address));
+  return make_unique<Socket>(client_socket, move(socket_address));
 }
 
 void Socket::close() {

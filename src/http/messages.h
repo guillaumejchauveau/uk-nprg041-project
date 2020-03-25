@@ -10,90 +10,193 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <iostream>
+
+
+#if defined(_WIN32)
+#define DELETE_BAK DELETE
+#undef DELETE
+#endif
+
+using namespace std;
 
 namespace http {
-typedef std::vector<std::string> header_t;
-struct Message {
-protected:
-  std::string protocol_version_;
-  std::map<std::string, header_t> headers_;
-  std::stringstream data_;
-
+typedef vector<string> header_value_t;
+class Message {
 public:
-  enum STATE {
-    REQUEST_LINE,
-    HEADER_LINE,
-    BODY
+  struct ProtocolVersion {
+  protected:
+    unsigned major;
+    unsigned minor;
+  public:
+    ProtocolVersion(unsigned major, unsigned minor) : major(major), minor(minor) {
+    }
+
+    explicit operator string() const {
+      string version = "HTTP/";
+      version += to_string(this->major);
+      version += '.';
+      version += to_string(this->minor);
+      return version;
+    }
+
+    static ProtocolVersion fromString(const string &str) {
+      auto major_begin = str.find('/') + 1;
+      auto major_end = str.find('.', major_begin);
+      auto major = static_cast<unsigned>(stoul(str.substr(major_begin, major_end - major_begin)));
+      auto minor = static_cast<unsigned>(stoul(str.substr(major_end + 1)));
+      return ProtocolVersion(major, minor);
+    }
   };
 
-  const STATE getState() const {
-    return this->state_;
+  const ProtocolVersion &getProtocolVersion() const {
+    return this->protocol_version_;
   }
 
-  const std::string &getProtocolVersion() const;
-  Message &setProtocolVersion(const std::string &version);
-  const std::map<std::string, header_t> &getHeaders() const;
-  bool hasHeader(const std::string &name) const;
-  const header_t &getHeader(const std::string &name) const;
-  const std::string getHeaderLine(const std::string &name) const;
-  Message &setHeader(const std::string &name, const std::string &value);
-  Message &setHeader(const std::string &name, const header_t &value);
-  Message &setAddedHeader(const std::string &name, const std::string &value);
-  Message &setAddedHeader(const std::string &name, const header_t &value);
-  Message &setHeader(const std::string &name);
-  std::ios &getBody() const;
+  void setProtocolVersion(ProtocolVersion version) {
+    this->protocol_version_ = version;
+  }
 
-  Message &setBody(std::stringstream &&body) {
-    if (this->getState() < BODY) {
-      throw utils::RuntimeException("Message is not ready for body manipulation");
+  const map<string, header_value_t> &getHeaders() const {
+    return this->headers_;
+  }
+
+  bool hasHeader(const string &name) const {
+    auto l_name = utils::tolower(name);
+    return this->headers_.count(l_name) > 0;
+  }
+
+  const header_value_t &getHeader(const string &name) const {
+    auto l_name = utils::tolower(name);
+    return this->headers_.at(l_name);
+  }
+
+  string getHeaderLine(const string &name) const {
+    auto l_name = utils::tolower(name);
+    ostringstream line(l_name);
+    line << ':';
+
+    auto first = true;
+    for (const auto &value : this->getHeader(l_name)) {
+      if (!first) {
+        line << ',';
+      }
+      line << value;
+      first = false;
     }
-    this->data_ = std::move(body);
+    return line.str();
+  }
+
+  void setAddedHeader(const string &name, string &&value) {
+    auto l_name = utils::tolower(name);
+    this->headers_[l_name].push_back(move(value));
+  }
+
+  void setAddedHeader(const string &name, header_value_t &&value) {
+    auto l_name = utils::tolower(name);
+    auto &stored_value = this->headers_[l_name];
+    stored_value.reserve(stored_value.size() + value.size());
+    stored_value.insert(stored_value.end(), value.begin(), value.end());
+  }
+
+  void setHeader(const string &name, string &&value) {
+    auto l_name = utils::tolower(name);
+    this->headers_[l_name].clear();
+    this->setAddedHeader(l_name, move(value));
+  }
+
+  void setHeader(const string &name, header_value_t &&value) {
+    auto l_name = utils::tolower(name);
+    this->headers_[l_name] = move(value);
+  }
+
+  void unsetHeader(const string &name) {
+    auto l_name = utils::tolower(name);
+    this->headers_.erase(l_name);
+  }
+
+  stringstream &getBody() {
+    return this->data_;
+  }
+
+  void setBody(stringstream &&body) {
+    this->data_ = move(body);
+  }
+
+  size_t getContentLength() const {
+    if (!this->hasHeader("Content-Length") || this->getHeader("Content-Length").empty()) {
+      return 0;
+    }
+    return stoul(this->getHeader("Content-Length")[0]);
+  }
+
+  void clear() {
+    this->protocol_version_ = {1u, 1u};
+    this->headers_.clear();
+    stringstream().swap(this->data_);
   }
 
 protected:
-  STATE state_;
+  ProtocolVersion protocol_version_;
+  map<string, header_value_t> headers_;
+  stringstream data_;
+
+  Message() : protocol_version_(1u, 1u) {
+    this->data_.exceptions(stringstream::failbit);
+  }
+
+  explicit Message(ProtocolVersion protocol_version) : protocol_version_(protocol_version) {
+    this->data_.exceptions(stringstream::failbit);
+  }
 };
 
-struct Request : public Message {
+class Request : public Message {
 public:
   struct Method {
-  public:
     enum METHOD {
       HEAD, GET, POST, PUT, PATCH, DELETE, PURGE, OPTIONS, TRACE, CONNECT
     };
 
     Method(const METHOD &method) {
-      this->value_ = method;
+      this->value = method;
     }
 
-    Method(const std::string &method) {
-      if (method == "HEAD") {
-        this->value_ = METHOD::HEAD;
-      } else if (method == "GET") {
-        this->value_ = METHOD::GET;
-      } else if (method == "POST") {
-        this->value_ = METHOD::POST;
-      } else if (method == "PUT") {
-        this->value_ = METHOD::PUT;
-      } else if (method == "PATCH") {
-        this->value_ = METHOD::PATCH;
-      } else if (method == "DELETE") {
-        this->value_ = METHOD::DELETE;
-      } else if (method == "PURGE") {
-        this->value_ = METHOD::PURGE;
-      } else if (method == "OPTIONS") {
-        this->value_ = METHOD::OPTIONS;
-      } else if (method == "TRACE") {
-        this->value_ = METHOD::TRACE;
-      } else if (method == "CONNECT") {
-        this->value_ = METHOD::CONNECT;
-      } else {
-        throw std::invalid_argument("Invalid method");
+    static Method fromString(const string &str) {
+      if (str == "HEAD") {
+        return Method(HEAD);
       }
+      if (str == "GET") {
+        return Method(GET);
+      }
+      if (str == "POST") {
+        return Method(POST);
+      }
+      if (str == "PUT") {
+        return Method(PUT);
+      }
+      if (str == "PATCH") {
+        return Method(PATCH);
+      }
+      if (str == "DELETE") {
+        return Method(DELETE);
+      }
+      if (str == "PURGE") {
+        return Method(PURGE);
+      }
+      if (str == "OPTIONS") {
+        return Method(OPTIONS);
+      }
+      if (str == "TRACE") {
+        return Method(TRACE);
+      }
+      if (str == "CONNECT") {
+        return Method(CONNECT);
+      }
+      throw invalid_argument("Invalid input");
     }
 
-    operator const char *() const {
-      switch (this->value_) {
+    explicit operator const char *() const {
+      switch (this->value) {
         case HEAD:
           return "HEAD";
         case GET:
@@ -114,36 +217,102 @@ public:
           return "TRACE";
         case CONNECT:
           return "CONNECT";
+        default:
+          throw logic_error("Unexpected method value");
       }
     }
 
   protected:
-    METHOD value_;
+    METHOD value;
   };
 
-  std::istringstream &getBody() const;
-  Request &setProtocolVersion(const std::string &version);
-  const Method &getMethod() const;
-  Request &setMethod(const Method &method);
-  const Uri &getUri() const;
-  Request &setUri(const Uri &uri, bool preserveHost = false);
-};
+  explicit Request(Method method) : method_(method) {
+  }
 
-struct ServerRequest : public Request {
+  Request(Method method, ProtocolVersion protocol_version)
+    : Message(protocol_version), method_(method) {
+  }
+
+  const Method &getMethod() const {
+    return this->method_;
+  }
+
+  void setMethod(Method method) {
+    this->method_ = method;
+  }
+
+  const Uri &getUri() const {
+    return this->uri_;
+  }
+
+  void setUri(Uri &&uri, bool preserveHost = false) {
+    this->uri_ = move(uri);
+  }
+
 protected:
-public:
-  ServerRequest &setMethod(const Method &method);
-  ServerRequest &setUri(const Uri &uri, bool preserveHost = false);
-  std::map<std::string, std::any> &getAttributes();
-  std::any getAttribute(const std::string &name, std::any default_value = nullptr);
-  ServerRequest &setAttribute(const std::string &name, std::any value);
-  ServerRequest &setAttribute(const std::string &name);
+  Method method_;
+  Uri uri_;
 };
 
-struct Response : public Message {
+class RequestParser {
+
+};
+
+class ServerRequest : public Request {
+public:
+  enum STATE {
+    REQUEST_LINE,
+    HEADER_LINE,
+    BODY,
+    COMPLETE
+  };
+
+  ServerRequest() : Request(Request::Method::GET), state_(REQUEST_LINE) {
+  }
+
+  explicit ServerRequest(Method method) : Request(method), state_(REQUEST_LINE) {
+  }
+
+  ServerRequest(Method method, ProtocolVersion protocol_version) : Request(
+    method,
+    protocol_version
+  ), state_(REQUEST_LINE) {
+  }
+
+  STATE getState() const {
+    return this->state_;
+  }
+
+  map<string, any> &getAttributes() {
+    return this->attributes_;
+  }
+
+  bool hasAttribute(const string &name) const {
+    return this->attributes_.count(name) > 0;
+  }
+
+  any &getAttribute(const string &name) {
+    return this->attributes_[name];
+  }
+
+  void setAttribute(const string &name, any &&value) {
+    this->attributes_[name] = move(value);
+  }
+
+  void unsetAttribute(const string &name) {
+    this->attributes_.erase(name);
+  }
+
+  friend RequestParser;
+
+protected:
+  STATE state_;
+  map<string, any> attributes_;
+};
+
+class Response : public Message {
 public:
   struct Status {
-  public:
     enum STATUS {
       // Informational 1xx
       CONTINUE = 100,
@@ -218,11 +387,15 @@ public:
     };
 
     Status(const STATUS &status) {
-      this->value_ = status;
+      this->value = status;
     }
 
-    operator const char *() const {
-      switch (this->value_) {
+    operator int() const {
+      return this->value;
+    }
+
+    explicit operator const char *() const {
+      switch (this->value) {
         case CONTINUE:
           return "Continue";
         case SWITCHING_PROTOCOLS:
@@ -353,19 +526,57 @@ public:
           return "Network Authentication Required";
         case NETWORK_CONNECT_TIMEOUT_ERROR:
           return "Network Connect Timeout Error";
+        default:
+          throw logic_error("Unexpected status value");
       }
     }
 
   protected:
-    STATUS value_;
+    STATUS value;
   };
 
-  std::ostringstream &getBody() const;
-  int getStatusCode() const;
-  const Response withStatus(int code, std::string reason_phrase = "") const;
-  const std::string getReasonPhrase() const;
+  Response() : status_(Status::OK) {
+    this->setStatus(this->status_);
+  }
+
+  explicit Response(Status status) : status_(status) {
+    this->setStatus(this->status_);
+  }
+
+  Response(Status status, ProtocolVersion protocol_version) : Message(protocol_version),
+                                                              status_(status) {
+    this->setStatus(this->status_);
+  }
+
+  const Status &getStatus() const {
+    return this->status_;
+  }
+
+  void setStatus(Status status) {
+    this->status_ = status;
+    this->reason_phrase_ = static_cast<const char *>(status);
+  }
+
+  void setStatus(Status status, string &&reason_phrase) {
+    this->status_ = status;
+    this->reason_phrase_ = move(reason_phrase);
+  }
+
+  const string &getReasonPhrase() const {
+    return this->reason_phrase_;
+  }
+
+protected:
+  Status status_;
+  string reason_phrase_;
 };
 
 } // namespace http
+
+
+#if defined(_WIN32)
+#define DELETE DELETE_BAK
+#undef DELETE_BAK
+#endif
 
 #endif //HTTP_MESSAGES_H

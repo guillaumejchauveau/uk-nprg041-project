@@ -6,6 +6,8 @@
 #include <map>
 #include <mutex>
 
+using namespace std;
+
 namespace net {
 /**
  * Abstract TCP server class. Can be extended to process incoming data from one client.
@@ -14,9 +16,9 @@ namespace net {
  */
 class TCPServer {
 protected:
-  std::unique_ptr<Socket> socket_{};
-  std::map<socket_handle_t, utils::UniqueLocker<Socket>> clients_{};
-  std::mutex clients_lock_;
+  unique_ptr<Socket> socket_;
+  map<socket_handle_t, utils::UniqueLocker<Socket>> clients_;
+  mutex clients_lock_;
   bool initialized_;
 
 #if defined(_WIN32)
@@ -32,10 +34,10 @@ protected:
    * Adds a client the server's list.
    * @param client The client's socket
    */
-  void addClient(std::unique_ptr<Socket> &&client) {
+  virtual void addClient(unique_ptr<Socket> &&client) {
     this->clients_lock_.lock();
     auto id = client->getHandle();
-    this->clients_.emplace(id, std::move(client));
+    this->clients_.emplace(id, move(client));
     this->clients_lock_.unlock();
   }
 
@@ -45,7 +47,7 @@ protected:
    * @param id The identifier of the client
    * @return The client
    */
-  std::unique_ptr<Socket> takeClient(socket_handle_t id) {
+  unique_ptr<Socket> takeClient(socket_handle_t id) {
     this->clients_lock_.lock();
     auto &locker = this->clients_[id];
     this->clients_lock_.unlock();
@@ -57,10 +59,10 @@ protected:
    * Behavior is undefined if called without ownership.
    * @param client The client
    */
-  void yieldClient(std::unique_ptr<Socket> &&client) {
+  void yieldClient(unique_ptr<Socket> &&client) {
     this->clients_lock_.lock();
-    auto handle = client->getHandle();
-    this->clients_[handle].yield(std::move(client));
+    auto id = client->getHandle();
+    this->clients_[id].yield(move(client));
     this->clients_lock_.unlock();
   }
 
@@ -69,7 +71,7 @@ protected:
    * Behavior is undefined if called without ownership.
    * @param id The identifier of the client
    */
-  void removeClient(socket_handle_t id) {
+  virtual void removeClient(socket_handle_t id) {
     this->clients_lock_.lock();
     this->clients_[id].reset();
     this->clients_.erase(id);
@@ -81,14 +83,14 @@ protected:
    * @param client The client who made the request
    * @return The client. Must be returned to yield ownership
    */
-  virtual std::unique_ptr<Socket> &&processClient(std::unique_ptr<Socket> &&client) = 0;
+  virtual unique_ptr<Socket> &&processClient(unique_ptr<Socket> &&client) = 0;
 
 public:
   /**
    * Creates a server given a socket.
    * @param socket The socket for the server
    */
-  explicit TCPServer(std::unique_ptr<Socket> &&socket);
+  explicit TCPServer(unique_ptr<Socket> &&socket);
   /**
    * Prevents copy of the server.
    */

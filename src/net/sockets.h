@@ -18,6 +18,8 @@
 #include <utility>
 #include <memory>
 
+using namespace std;
+
 namespace net {
 #if defined(_WIN32)
 /// Common type for the actual socket.
@@ -111,8 +113,8 @@ struct SocketAddress {
    * @param flags Flags for ::getnameinfo
    * @return The host name
    */
-  std::string getHost(int flags = 0) const {
-    std::string host;
+  string getHost(int flags = 0) const {
+    string host;
     host.resize(20);
 
     int code;
@@ -134,8 +136,8 @@ struct SocketAddress {
    * @param flags Flags for ::getnameinfo
    * @return The service name
    */
-  std::string getService(int flags = 0) const {
-    std::string service;
+  string getService(int flags = 0) const {
+    string service;
     service.resize(20);
 
     int code;
@@ -155,7 +157,7 @@ struct SocketAddress {
   /**
    * @return A string with the form "host:port"
    */
-  operator std::string() const {
+  explicit operator string() const {
     return this->getHost() + ":" + this->getService(NI_NUMERICSERV);
   }
 };
@@ -166,15 +168,15 @@ struct SocketAddress {
 class Socket {
 protected:
   socket_handle_t handle_;
-  std::unique_ptr<SocketAddress> address_;
+  unique_ptr<SocketAddress> address_;
   int last_error_;
 
   /**
-   * @throw std::runtime_error Thrown if the socket is in an invalid state
+   * @throw runtime_error Thrown if the socket is in an invalid state
    */
   void checkState() const {
     if (this->isInvalid()) {
-      throw std::runtime_error("Invalid socket state");
+      throw utils::RuntimeException("Invalid socket state");
     }
   }
 
@@ -199,17 +201,17 @@ public:
   /**
    * Creates a socket given an address and initializes the socket handler.
    * @param address The address is moved to prevent modifications outside the wrapper
-   * @throw std::invalid_argument Thrown if the socket handler could not be created
+   * @throw invalid_argument Thrown if the socket handler could not be created
    */
-  Socket(std::unique_ptr<SocketAddress> &&address) : address_(
-    std::move(address)) {
+  Socket(unique_ptr<SocketAddress> &&address) : address_(
+    move(address)) {
     this->handle_ =
       ::socket(this->address_->ai_family, this->address_->ai_socktype,
                this->address_->ai_protocol);
     this->last_error_ = 0;
     if (this->isInvalid()) {
       this->last_error_ = -1;
-      throw std::invalid_argument("Invalid address");
+      throw invalid_argument("Invalid address");
     }
   }
 
@@ -217,15 +219,14 @@ public:
    * Creates a socket with a valid socket handler and an address.
    * @param handle The socket handler to use
    * @param address The address is moved to prevent modifications outside the wrapper
-   * @throw std::invalid_argument Thrown if the handler is invalid
+   * @throw invalid_argument Thrown if the handler is invalid
    */
-  Socket(socket_handle_t handle, std::unique_ptr<SocketAddress> &&address) : address_(
-    std::move(address)) {
+  Socket(socket_handle_t handle, unique_ptr<SocketAddress> &&address) : address_(move(address)) {
     this->handle_ = handle;
     this->last_error_ = 0;
     if (this->isInvalid()) {
       this->last_error_ = -1;
-      throw std::invalid_argument("Invalid handle");
+      throw invalid_argument("Invalid handle");
     }
   }
 
@@ -234,7 +235,7 @@ public:
    */
   Socket(const Socket &socket) = delete;
 
-  Socket(Socket &&socket) noexcept : address_(std::move(socket.address_)) {
+  Socket(Socket &&socket) noexcept : address_(move(socket.address_)) {
     this->handle_ = socket.handle_;
     socket.handle_ = INVALID_SOCKET_HANDLE;
     this->last_error_ = socket.last_error_;
@@ -251,7 +252,7 @@ public:
     }
     this->handle_ = socket.handle_;
     socket.handle_ = INVALID_SOCKET_HANDLE;
-    this->address_ = std::move(socket.address_);
+    this->address_ = move(socket.address_);
     this->last_error_ = socket.last_error_;
     return *this;
   }
@@ -266,7 +267,7 @@ public:
   /**
    * @return The address associated with the socket
    */
-  const std::unique_ptr<SocketAddress> &getAddress() const {
+  const unique_ptr<SocketAddress> &getAddress() const {
     return this->address_;
   }
 
@@ -306,17 +307,17 @@ public:
    * @see ::getsockopt
    */
   template<typename T>
-  std::unique_ptr<T> getsockopt(int level, int option_name) const {
+  unique_ptr<T> getsockopt(int level, int option_name) const {
     this->checkState();
     auto option_value = new T;
     auto option_len = sizeof(T);
     // Option value reinterpreted for WinSock.
-    if ((::getsockopt(this->handle_, level, option_name,
-                      reinterpret_cast<char *>(option_value),
-                      reinterpret_cast<socklen_t *>(&option_len))) != 0) {
+    if (::getsockopt(this->handle_, level, option_name,
+                     reinterpret_cast<char *>(option_value),
+                     reinterpret_cast<socklen_t *>(&option_len)) != 0) {
       throw utils::SystemException::fromLastError();
     }
-    return std::unique_ptr<T>(option_value);
+    return unique_ptr<T>(option_value);
   }
 
   /**
@@ -397,7 +398,7 @@ public:
    */
   void listen(int max = SOMAXCONN) {
     this->checkState();
-    if ((::listen(this->handle_, max)) != 0) {
+    if (::listen(this->handle_, max) != 0) {
       throw utils::SystemException::fromLastError();
     }
   }
@@ -409,7 +410,7 @@ public:
    * @throw utils::Exception Thrown if the operation failed
    * @see ::accept
    */
-  std::unique_ptr<Socket> accept(bool non_blocking_accepted = false) const;
+  unique_ptr<Socket> accept(bool non_blocking_accepted = false) const;
 
   /**
    * Receives data through the socket.
@@ -468,7 +469,7 @@ public:
    */
   void shutdown(int how) {
     this->checkState();
-    if ((::shutdown(this->handle_, how)) != 0) {
+    if (::shutdown(this->handle_, how) != 0) {
       throw utils::SystemException::fromLastError();
     }
   }
@@ -526,20 +527,20 @@ public:
    * @param reuse Defines if the socket should reuse a previously bound address
    * @return The socket
    */
-  static std::unique_ptr<Socket> boundSocket(int family_hint, int socktype_hint, int protocol_hint,
-                                             const char *name, const char *service,
-                                             bool non_blocking = false, bool reuse = false) {
+  static unique_ptr<Socket> boundSocket(int family_hint, int socktype_hint, int protocol_hint,
+                                        const char *name, const char *service,
+                                        bool non_blocking = false, bool reuse = false) {
     auto info = SocketFactory::getaddrinfo(family_hint, socktype_hint, protocol_hint, AI_PASSIVE,
                                            name,
                                            service);
 
-    std::unique_ptr<Socket> sock;
-    std::unique_ptr<utils::SystemException> error;
+    unique_ptr<Socket> sock;
+    unique_ptr<utils::SystemException> error;
     // Tries the addresses until one is bound successfully.
     for (auto addr = info; addr != nullptr; addr = addr->ai_next) {
-      auto address = std::make_unique<SocketAddress>(addr);
+      auto address = make_unique<SocketAddress>(addr);
       try {
-        sock = std::make_unique<Socket>(std::move(address));
+        sock = make_unique<Socket>(move(address));
         if (reuse) {
           sock->setsockopt(SOL_SOCKET, SO_REUSEADDR, 1);
         }
@@ -548,7 +549,7 @@ public:
           sock->setNonBlocking();
         }
       } catch (utils::SystemException &e) {
-        error = std::make_unique<utils::SystemException>(std::move(e));
+        error = make_unique<utils::SystemException>(move(e));
         sock.reset();
         continue;
       }
@@ -556,7 +557,7 @@ public:
     }
     freeaddrinfo(info);
     if (!sock) {
-      std::string message = "Unknown error";
+      string message = "Unknown error";
       if (error) {
         message = error->getMessage();
       }
@@ -574,25 +575,25 @@ public:
    * @param non_blocking Defines if the socket should be asynchronous (false by default)
    * @return The socket
    */
-  static std::unique_ptr<Socket> connectedSocket(int socktype_hint, int protocol_hint,
-                                                 const char *name,
-                                                 const char *service, bool non_blocking = false) {
+  static unique_ptr<Socket> connectedSocket(int socktype_hint, int protocol_hint,
+                                            const char *name,
+                                            const char *service, bool non_blocking = false) {
     auto info = SocketFactory::getaddrinfo(AF_UNSPEC, socktype_hint, protocol_hint, 0, name,
                                            service);
 
-    std::unique_ptr<Socket> sock;
-    std::unique_ptr<utils::SystemException> error;
+    unique_ptr<Socket> sock;
+    unique_ptr<utils::SystemException> error;
     // Tries the addresses until one is connected successfully.
     for (auto addr = info; addr != nullptr; addr = addr->ai_next) {
-      auto address = std::make_unique<SocketAddress>(addr);
+      auto address = make_unique<SocketAddress>(addr);
       try {
-        sock = std::make_unique<Socket>(std::move(address));
+        sock = make_unique<Socket>(move(address));
         sock->connect();
         if (non_blocking) {
           sock->setNonBlocking();
         }
       } catch (utils::SystemException &e) {
-        error = std::make_unique<utils::SystemException>(std::move(e));
+        error = make_unique<utils::SystemException>(move(e));
         sock.reset();
         continue;
       }
@@ -600,7 +601,7 @@ public:
     }
     freeaddrinfo(info);
     if (!sock) {
-      std::string message = "Unknown error";
+      string message = "Unknown error";
       if (error) {
         message = error->getMessage();
       }

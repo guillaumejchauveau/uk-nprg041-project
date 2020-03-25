@@ -20,6 +20,8 @@
 
 #endif
 
+using namespace std;
+
 namespace utils {
 #if defined(_WIN32)
 /**
@@ -36,7 +38,7 @@ struct LocalFreeHelper {
 /**
  * Exception with a string message.
  */
-class RuntimeException : public std::runtime_error {
+class RuntimeException : public runtime_error {
 public:
   /**
    * Creates an instance using printf-style formatting.
@@ -47,12 +49,12 @@ public:
    * @see ::printf
    */
   template<typename ... Args>
-  explicit RuntimeException(const std::string &format, Args ... args) : runtime_error("") {
+  explicit RuntimeException(const string &format, Args ... args) : runtime_error("") {
     auto size = static_cast<size_t>(snprintf(nullptr, 0, format.c_str(), args ...)) + 1;
     if (size <= 0) {
-      throw std::runtime_error("Error during formatting.");
+      throw runtime_error("Error during formatting.");
     }
-    std::string message;
+    string message;
     message.resize(size);
     snprintf(&message.front(), size, format.c_str(), args ...);
     runtime_error::operator=(runtime_error(message));
@@ -104,9 +106,9 @@ public:
    * Allocates a string for the message corresponding to the error.
    * @return The string container
    */
-  virtual std::string getMessage() const {
+  virtual string getMessage() const {
 #if defined(_WIN32)
-    std::unique_ptr<wchar_t[], LocalFreeHelper> buff;
+    unique_ptr<wchar_t[], LocalFreeHelper> buff;
     LPWSTR buffPtr;
     FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
                   FORMAT_MESSAGE_IGNORE_INSERTS,
@@ -116,7 +118,7 @@ public:
     buff.reset(buffPtr);
     return utils::wchar::narrow(buff.get());
 #else
-    std::string buff;
+    string buff;
     buff.resize(64);
     auto result = strerror_r(static_cast<int>(this->getError()), &buff.front(), buff.size());
     buff.resize(buff.find((char) 0));
@@ -134,18 +136,18 @@ public:
    * thread will not be an issue.
    */
   const char *what() const noexcept override {
-    static thread_local std::string message;
+    static thread_local string message;
     message = this->getMessage();
     return message.c_str();
   }
 };
 
 /**
- * Extension of base exception for address info errors handling on linux.
+ * Extension of system exception for address info errors handling on linux.
  */
 class AddressInfoException : public SystemException {
 protected:
-  static std::mutex lock_;
+  inline static mutex lock_;
 public:
   /**
    * @see Exception(int)
@@ -155,9 +157,9 @@ public:
 
 #if !defined(_WIN32) // Linux only
 
-  std::string getMessage() const override {
+  string getMessage() const override {
     // gai_strerror is not thread safe.
-    std::lock_guard<std::mutex> g(AddressInfoException::lock_);
+    lock_guard<mutex> g(AddressInfoException::lock_);
     return gai_strerror(static_cast<int>(this->getError()));
   }
 
