@@ -2,7 +2,7 @@
 #include "tcp.h"
 #include "sys/epoll.h"
 
-#define TCP_CLIENT_EVENTS (EPOLLIN | EPOLLRDHUP | EPOLLET | EPOLLONESHOT)
+constexpr auto TCP_CLIENT_EVENTS = (EPOLLIN | EPOLLRDHUP | EPOLLET | EPOLLONESHOT);
 
 namespace net {
 TCPServer::TCPServer(unique_ptr<Socket> &&socket) : socket_(move(socket)) {
@@ -59,7 +59,8 @@ void TCPServer::run() {
     }
     for (int i = 0; i < ready_count; i++) {
       event_fd = ready[i].data.fd;
-      if (event_fd == this->socket_->getHandle()) { // Event is a new connection.
+      // Event is a new connection.
+      if (event_fd == this->socket_->getHandle()) {
         client = this->socket_->accept(true);
         if (!client) {
           continue;
@@ -71,28 +72,22 @@ void TCPServer::run() {
         }
         this->addClient(move(client));
       } else { // A connected client changed state.
-        client = this->takeClient(event_fd); // Takes ownership of the client.
-        if (!client) { // Client has been taken by another thread.
-          continue;
-        }
-        client = this->processClient(move(client)); // Processes the client's data.
-
-        if ((ready[i].events & EPOLLRDHUP) == EPOLLRDHUP) { // Client won't send anymore data.
+        auto shutdown = false;
+        // Client won't send anymore data.
+        if ((ready[i].events & EPOLLRDHUP) == EPOLLRDHUP) {
           if (::epoll_ctl(this->epoll_fd_, EPOLL_CTL_DEL, event_fd, nullptr) != 0) {
             throw utils::SystemException::fromLastError();
           }
-          this->removeClient(event_fd);
-          client.reset();
-          continue;
+          shutdown = true;
         }
 
-        this->yieldClient(move(client));
-
-        // Re-arms the client after EPOLLONESHOT.
-        event.events = TCP_CLIENT_EVENTS;
-        event.data.fd = event_fd;
-        if (::epoll_ctl(this->epoll_fd_, EPOLL_CTL_MOD, event_fd, &event) != 0) {
-          throw utils::SystemException::fromLastError();
+        if (this->processClient(event_fd, shutdown)) {
+          // Re-arms the client after EPOLLONESHOT.
+          event.events = TCP_CLIENT_EVENTS;
+          event.data.fd = event_fd;
+          if (::epoll_ctl(this->epoll_fd_, EPOLL_CTL_MOD, event_fd, &event) != 0) {
+            throw utils::SystemException::fromLastError();
+          }
         }
       }
     }

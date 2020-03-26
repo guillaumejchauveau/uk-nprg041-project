@@ -17,6 +17,14 @@ protected:
   string query_;
   string fragment_;
 public:
+  Uri() : port_(0) {
+  }
+
+  static Uri fromString(const string &str) {
+    // TODO: Implement method stub.
+    return Uri();
+  }
+
   const string &getScheme() const {
     return this->scheme_;
   }
@@ -73,8 +81,14 @@ public:
     this->fragment_ = move(fragment);
   }
 
-  static Uri fromString(const string &str) {
-    return Uri();
+  void clear() {
+    this->scheme_.clear();
+    this->user_info_.clear();
+    this->host_.clear();
+    this->port_ = 0;
+    this->path_.clear();
+    this->query_.clear();
+    this->fragment_.clear();
   }
 };
 }

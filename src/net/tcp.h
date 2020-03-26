@@ -10,14 +10,58 @@ using namespace std;
 
 namespace net {
 /**
- * Abstract TCP server class. Can be extended to process incoming data from one client.
- * The server keeps a list of the connected clients' sockets. Only one request from a given client
- * can be processed at the same time, even across threads.
+ * A class responsible of processing a specific client during its lifespan.
+ * An instance of this class can be associated with a new client with the
+ * connected/shutdown/disconnected events.
+ * This default class is intended to be extended. Override TCPServer::makeClientEventsListener() to
+ * use a custom listener.
+ */
+class ClientEventsListener {
+public:
+  virtual ~ClientEventsListener() = default;
+
+  /**
+   * The client has been associated with this instance.
+   */
+  virtual unique_ptr<Socket> &&connected(unique_ptr<Socket> &&client) {
+    return move(client);
+  }
+
+  /**
+   * The client has sent data.
+   */
+  virtual unique_ptr<Socket> &&dataAvailable(unique_ptr<Socket> &&client) {
+    char buf[128];
+    while ((client->recv(buf, 128)) > 0) { // Empties the TCP buffer.
+    }
+    return move(client);
+  }
+
+  /**
+   * The client won't send anymore data. The client might be completely disconnected, socket may be
+   * invalid/broken.
+   */
+  virtual unique_ptr<Socket> &&shutdown(unique_ptr<Socket> &&client) {
+    return move(client);
+  }
+};
+
+/**
+ * Abstract TCP server class.
  */
 class TCPServer {
 protected:
+  /**
+   * Creates a new client events listener. Used to override the default type.
+   */
+  virtual unique_ptr<ClientEventsListener> makeClientEventsListener() {
+    return make_unique<ClientEventsListener>();
+  }
+
+  typedef socket_handle_t client_id_t;
   unique_ptr<Socket> socket_;
-  map<socket_handle_t, utils::UniqueLocker<Socket>> clients_;
+  map<client_id_t, utils::UniqueLocker<Socket>> clients_;
+  map<client_id_t, unique_ptr<ClientEventsListener>> client_events_listeners_;
   mutex clients_lock_;
   bool initialized_;
 
@@ -31,59 +75,52 @@ protected:
 #endif
 
   /**
-   * Adds a client the server's list.
+   * Adds a client to the server's list. Creates an associated client events listener if necessary.
    * @param client The client's socket
    */
-  virtual void addClient(unique_ptr<Socket> &&client) {
-    this->clients_lock_.lock();
+  void addClient(unique_ptr<Socket> &&client) {
     auto id = client->getHandle();
-    this->clients_.emplace(id, move(client));
-    this->clients_lock_.unlock();
-  }
-
-  /**
-   * Takes ownership of the client.
-   * Behavior is undefined if called in the thread already owning the data.
-   * @param id The identifier of the client
-   * @return The client
-   */
-  unique_ptr<Socket> takeClient(socket_handle_t id) {
+    if (this->client_events_listeners_.count(id) == 0) {
+      this->client_events_listeners_.emplace(id, this->makeClientEventsListener());
+    }
+    client = this->client_events_listeners_.at(id)->connected(move(client));
     this->clients_lock_.lock();
-    auto &locker = this->clients_[id];
+    this->clients_[id] = move(client);
     this->clients_lock_.unlock();
-    return locker.try_take();
   }
 
   /**
-   * Yields ownership of the client.
-   * Behavior is undefined if called without ownership.
-   * @param client The client
+   * Notifies the events listener associated with the client.
+   * @param id The ID of the client
+   * @param shutdown The client won't send data anymore
+   * @return The client is ready to reprocessed
    */
-  void yieldClient(unique_ptr<Socket> &&client) {
+  bool processClient(client_id_t id, bool shutdown) {
     this->clients_lock_.lock();
-    auto id = client->getHandle();
-    this->clients_[id].yield(move(client));
+    auto client = this->clients_[id].try_take();
     this->clients_lock_.unlock();
-  }
+    // Client has been taken by another thread.
+    if (!client) {
+      return false;
+    }
 
-  /**
-   * Removes a client from the server's list.
-   * Behavior is undefined if called without ownership.
-   * @param id The identifier of the client
-   */
-  virtual void removeClient(socket_handle_t id) {
+    client = this->client_events_listeners_.at(id)->dataAvailable(move(client));
+    if (client->isInvalid()) {
+      shutdown = true;
+    }
+    if (shutdown) {
+      this->client_events_listeners_.at(id)->shutdown(move(client));
+    }
+
     this->clients_lock_.lock();
-    this->clients_[id].reset();
-    this->clients_.erase(id);
+    if (shutdown) {
+      this->clients_[id].reset();
+    } else {
+      this->clients_[id].yield(move(client));
+    }
     this->clients_lock_.unlock();
+    return !shutdown;
   }
-
-  /**
-   * Method called by the server when a client makes a request.
-   * @param client The client who made the request
-   * @return The client. Must be returned to yield ownership
-   */
-  virtual unique_ptr<Socket> &&processClient(unique_ptr<Socket> &&client) = 0;
 
 public:
   /**

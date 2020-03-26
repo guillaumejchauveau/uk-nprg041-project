@@ -12,7 +12,6 @@
 #include <vector>
 #include <iostream>
 
-
 #if defined(_WIN32)
 #define DELETE_BAK DELETE
 #undef DELETE
@@ -116,11 +115,11 @@ public:
   }
 
   stringstream &getBody() {
-    return this->data_;
+    return this->body_;
   }
 
   void setBody(stringstream &&body) {
-    this->data_ = move(body);
+    this->body_ = move(body);
   }
 
   size_t getContentLength() const {
@@ -131,29 +130,30 @@ public:
   }
 
   void clear() {
-    this->protocol_version_ = {1u, 1u};
+    this->protocol_version_ = {0u, 0u};
     this->headers_.clear();
-    stringstream().swap(this->data_);
+    stringstream().swap(this->body_);
+    this->body_.exceptions(stringstream::failbit);
   }
 
 protected:
   ProtocolVersion protocol_version_;
   map<string, header_value_t> headers_;
-  stringstream data_;
+  stringstream body_;
 
-  Message() : protocol_version_(1u, 1u) {
-    this->data_.exceptions(stringstream::failbit);
+  Message() : protocol_version_(0u, 0u) {
+    this->body_.exceptions(stringstream::failbit);
   }
 
   explicit Message(ProtocolVersion protocol_version) : protocol_version_(protocol_version) {
-    this->data_.exceptions(stringstream::failbit);
+    this->body_.exceptions(stringstream::failbit);
   }
 };
 
 class Request : public Message {
 public:
   struct Method {
-    enum METHOD {
+    enum class METHOD {
       HEAD, GET, POST, PUT, PATCH, DELETE, PURGE, OPTIONS, TRACE, CONNECT
     };
 
@@ -163,62 +163,60 @@ public:
 
     static Method fromString(const string &str) {
       if (str == "HEAD") {
-        return Method(HEAD);
+        return Method(METHOD::HEAD);
       }
       if (str == "GET") {
-        return Method(GET);
+        return Method(METHOD::GET);
       }
       if (str == "POST") {
-        return Method(POST);
+        return Method(METHOD::POST);
       }
       if (str == "PUT") {
-        return Method(PUT);
+        return Method(METHOD::PUT);
       }
       if (str == "PATCH") {
-        return Method(PATCH);
+        return Method(METHOD::PATCH);
       }
       if (str == "DELETE") {
-        return Method(DELETE);
+        return Method(METHOD::DELETE);
       }
       if (str == "PURGE") {
-        return Method(PURGE);
+        return Method(METHOD::PURGE);
       }
       if (str == "OPTIONS") {
-        return Method(OPTIONS);
+        return Method(METHOD::OPTIONS);
       }
       if (str == "TRACE") {
-        return Method(TRACE);
+        return Method(METHOD::TRACE);
       }
       if (str == "CONNECT") {
-        return Method(CONNECT);
+        return Method(METHOD::CONNECT);
       }
       throw invalid_argument("Invalid input");
     }
 
     explicit operator const char *() const {
       switch (this->value) {
-        case HEAD:
+        case METHOD::HEAD:
           return "HEAD";
-        case GET:
+        case METHOD::GET:
           return "GET";
-        case POST:
+        case METHOD::POST:
           return "POST";
-        case PUT:
+        case METHOD::PUT:
           return "PUT";
-        case PATCH:
+        case METHOD::PATCH:
           return "PATCH";
-        case DELETE:
+        case METHOD::DELETE:
           return "DELETE";
-        case PURGE:
+        case METHOD::PURGE:
           return "PURGE";
-        case OPTIONS:
+        case METHOD::OPTIONS:
           return "OPTIONS";
-        case TRACE:
+        case METHOD::TRACE:
           return "TRACE";
-        case CONNECT:
+        case METHOD::CONNECT:
           return "CONNECT";
-        default:
-          throw logic_error("Unexpected method value");
       }
     }
 
@@ -249,34 +247,39 @@ public:
     this->uri_ = move(uri);
   }
 
+  void clear() {
+    Message::clear();
+    this->method_ = Method::METHOD::GET;
+    this->uri_.clear();
+  }
+
 protected:
   Method method_;
   Uri uri_;
 };
 
-class RequestParser {
-
-};
+class HTTPServer;
 
 class ServerRequest : public Request {
+  friend HTTPServer;
 public:
-  enum STATE {
+  enum class STATE {
+    INVALID,
     REQUEST_LINE,
-    HEADER_LINE,
-    BODY,
-    COMPLETE
+    HEADERS,
+    BODY
   };
 
-  ServerRequest() : Request(Request::Method::GET), state_(REQUEST_LINE) {
+  ServerRequest() : Request(Method::METHOD::GET), state_(STATE::INVALID) {
   }
 
-  explicit ServerRequest(Method method) : Request(method), state_(REQUEST_LINE) {
+  explicit ServerRequest(Method method) : Request(method), state_(STATE::INVALID) {
   }
 
   ServerRequest(Method method, ProtocolVersion protocol_version) : Request(
     method,
     protocol_version
-  ), state_(REQUEST_LINE) {
+  ), state_(STATE::INVALID) {
   }
 
   STATE getState() const {
@@ -303,7 +306,11 @@ public:
     this->attributes_.erase(name);
   }
 
-  friend RequestParser;
+  void clear() {
+    Request::clear();
+    this->state_ = STATE::INVALID;
+    this->attributes_.clear();
+  }
 
 protected:
   STATE state_;

@@ -193,7 +193,7 @@ protected:
    */
   static bool isErrorEInProgress(long int error);
   /**
-   *
+   * Makes the socket non-blocking.
    */
   void setNonBlocking();
 
@@ -405,12 +405,12 @@ public:
 
   /**
    * Accepts an incoming connection.
-   * @param non_blocking_accepted Sets the client's socket asynchronous
+   * @param set_non_blocking Sets the client's socket asynchronous
    * @return The socket of the connected client
    * @throw utils::Exception Thrown if the operation failed
    * @see ::accept
    */
-  unique_ptr<Socket> accept(bool non_blocking_accepted = false) const;
+  unique_ptr<Socket> accept(bool set_non_blocking = false) const;
 
   /**
    * Receives data through the socket.
@@ -508,7 +508,7 @@ protected:
     hints.ai_socktype = socktype_hint;
     hints.ai_protocol = protocol_hint;
     hints.ai_flags = flags_hint;
-    int error = ::getaddrinfo(name, service, &hints, &info);
+    auto error = ::getaddrinfo(name, service, &hints, &info);
     if (error != 0) {
       throw utils::AddressInfoException(error);
     }

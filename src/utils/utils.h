@@ -92,18 +92,22 @@ public:
 
   /**
    * Move constructor.
+   * TODO: Probably unsafe in certain conditions
    */
-  UniqueLocker(UniqueLocker<T> &&other) noexcept {
+  /*UniqueLocker(UniqueLocker<T> &&other) noexcept {
     this->lock_ = move(other.lock_);
     this->data_ = move(other.data_);
-  }
+  }*/
+  UniqueLocker(UniqueLocker<T> &&other) noexcept = delete;
 
   /**
    * Assigns data to the locker.
    * @param data The data
    */
   UniqueLocker &operator=(unique_ptr<T> &&data) {
+    this->lock_.lock();
     this->data_ = move(data);
+    this->lock_.unlock();
     return *this;
   }
 
@@ -114,15 +118,17 @@ public:
 
   /**
    * Move assignment.
+   * TODO: Probably unsafe in certain conditions
    */
-  UniqueLocker &operator=(UniqueLocker<T> &&other) noexcept {
+  /*UniqueLocker &operator=(UniqueLocker<T> &&other) noexcept {
     if (this == &other) {
       return *this;
     }
     this->lock_ = move(other.lock_);
     this->data_ = move(other.data_);
     return *this;
-  }
+  }*/
+  UniqueLocker &operator=(UniqueLocker<T> &&other) noexcept = delete;
 
   ~UniqueLocker() = default;
 

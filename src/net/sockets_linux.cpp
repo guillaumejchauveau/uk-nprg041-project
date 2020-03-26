@@ -21,7 +21,7 @@ void Socket::setNonBlocking() {
   }
 }
 
-unique_ptr<Socket> Socket::accept(bool non_blocking_accepted) const {
+unique_ptr<Socket> Socket::accept(bool set_non_blocking) const {
   this->checkState();
   socklen_t client_sock_address_len = sizeof(sockaddr_storage);
   auto client_sock_address =
@@ -29,7 +29,7 @@ unique_ptr<Socket> Socket::accept(bool non_blocking_accepted) const {
   memset(client_sock_address, 0, static_cast<size_t>(client_sock_address_len));
 
   int flags = 0;
-  if (non_blocking_accepted) {
+  if (set_non_blocking) {
     flags = SOCK_NONBLOCK;
   }
   socket_handle_t client_socket =
