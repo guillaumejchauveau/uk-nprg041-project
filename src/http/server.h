@@ -13,11 +13,19 @@ namespace http {
 class HTTPServer : public net::TCPServer, public RequestHandler {
 protected:
   application_middleware_t middleware_;
+  struct MiddlewareStatus {
+    application_middleware_t::const_iterator current;
+    bool process_interrupted;
 
-  void resetRequestMiddleware(ServerRequest &request) const {
-    request.setAttribute(CURRENT_MIDDLEWARE_ATTRIBUTE,
-                         make_any<application_middleware_t::const_iterator>(
-                           this->middleware_.cbegin()));
+    explicit MiddlewareStatus(application_middleware_t::const_iterator &&current) :
+      current(move(current)), process_interrupted(false) {
+    }
+  };
+  inline static const string MIDDLEWARE_STATUS_ATTRIBUTE = "_middleware_status";
+
+  void resetRequestMiddlewareStatus(ServerRequest &request) const {
+    request.setAttribute(MIDDLEWARE_STATUS_ATTRIBUTE,
+                         make_any<MiddlewareStatus>(this->middleware_.cbegin()));
   }
 
   unique_ptr<net::Socket> &&sendResponse(unique_ptr<Response> response,
@@ -29,7 +37,7 @@ protected:
     head += " ";
     head += to_string(static_cast<int>(response->getStatus()));
     head += " ";
-    head += static_cast<const char *>(response->getStatus());
+    head += response->getReasonPhrase();
     head += "\r\n";
     for (const auto &header : response->getHeaders()) {
       head += header.first + ":";
@@ -47,15 +55,13 @@ protected:
     try {
       client->send(head.c_str(), head.length());
       client->send(content.c_str(), content.length());
-    } catch (exception &e) {
+    } catch (...) {
       client->close();
     }
     return move(client);
   }
 
 public:
-  inline static const string CURRENT_MIDDLEWARE_ATTRIBUTE = "_current_middleware";
-
   explicit HTTPServer(unique_ptr<net::Socket> &&socket) : TCPServer(move(socket)) {
   }
 
@@ -71,14 +77,21 @@ public:
   }
 
   unique_ptr<Response> handle(ServerRequest &request) const override {
-    auto &current_middleware = any_cast<application_middleware_t::const_iterator &>(
-      request.getAttribute(CURRENT_MIDDLEWARE_ATTRIBUTE));
+    auto &middleware_status = any_cast<MiddlewareStatus &>(
+      request.getAttribute(MIDDLEWARE_STATUS_ATTRIBUTE));
+    auto &current_middleware = middleware_status.current;
     if (current_middleware == this->middleware_.cend()) {
       throw utils::RuntimeException("Middleware stack exhausted");
     }
     auto &middleware = *current_middleware;
     ++current_middleware;
-    return middleware->process(request, *this);
+    middleware_status.process_interrupted = false;
+    auto response = middleware->process(request, *this);
+    if (!response && !middleware_status.process_interrupted) {
+      middleware_status.process_interrupted = true;
+      --current_middleware;
+    }
+    return response;
   }
 
 protected:
@@ -92,7 +105,7 @@ protected:
 
     void resetRequestParsing() {
       this->current_request_.clear();
-      this->server_.resetRequestMiddleware(this->current_request_);
+      this->server_.resetRequestMiddlewareStatus(this->current_request_);
       this->line_.clear();
       this->loaded_body_size_ = 0;
       this->response_sent_ = false;
@@ -207,10 +220,13 @@ protected:
             this->current_request_.state_ = ServerRequest::STATE::BODY;
           }
         }
-      } catch (exception &e) {
+      } catch (...) {
         client = this->server_
                      .sendResponse(make_unique<Response>(Response::Status::BAD_REQUEST),
                                    move(client));
+        // As parsing the request failed, the next data received from the client will be in an
+        // uncertain state. It is safer to close the connection and let the client start over.
+        // The event listener's state will be reset with the "connected" event.
         client->close();
         return move(client);
       }
@@ -219,11 +235,15 @@ protected:
         unique_ptr<Response> response;
         try {
           response = this->server_.handle(this->current_request_);
-        } catch (exception &e) {
+        } catch (...) {
+          response = make_unique<Response>(Response::Status::INTERNAL_SERVER_ERROR);
+        }
+        // Unable to provide a response to the request.
+        if (!response && this->current_request_.state_ == ServerRequest::STATE::BODY) {
           response = make_unique<Response>(Response::Status::INTERNAL_SERVER_ERROR);
         }
         if (response) {
-          this->server_.resetRequestMiddleware(this->current_request_);
+          this->server_.resetRequestMiddlewareStatus(this->current_request_);
           this->response_sent_ = true;
           client = this->server_.sendResponse(move(response), move(client));
         }

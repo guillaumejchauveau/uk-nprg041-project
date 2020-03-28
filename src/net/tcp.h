@@ -32,13 +32,14 @@ public:
    */
   virtual unique_ptr<Socket> &&dataAvailable(unique_ptr<Socket> &&client) {
     char buf[128];
-    while ((client->recv(buf, 128)) > 0) { // Empties the TCP buffer.
+    // Empties the TCP buffer.
+    while ((client->recv(buf, 128)) > 0) {
     }
     return move(client);
   }
 
   /**
-   * The client won't send anymore data. The client might be completely disconnected, socket may be
+   * The client won't send anymore data. It might be completely disconnected and socket may be
    * invalid/broken.
    */
   virtual unique_ptr<Socket> &&shutdown(unique_ptr<Socket> &&client) {
@@ -93,7 +94,7 @@ protected:
    * Notifies the events listener associated with the client.
    * @param id The ID of the client
    * @param shutdown The client won't send data anymore
-   * @return The client is ready to reprocessed
+   * @return Whether if the client is ready to reprocessed
    */
   bool processClient(client_id_t id, bool shutdown) {
     this->clients_lock_.lock();

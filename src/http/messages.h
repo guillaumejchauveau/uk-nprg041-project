@@ -129,7 +129,7 @@ public:
     return stoul(this->getHeader("Content-Length")[0]);
   }
 
-  void clear() {
+  virtual void clear() {
     this->protocol_version_ = {0u, 0u};
     this->headers_.clear();
     stringstream().swap(this->body_);
@@ -158,7 +158,7 @@ public:
     };
 
     Method(const METHOD &method) {
-      this->value = method;
+      this->value_ = method;
     }
 
     static Method fromString(const string &str) {
@@ -196,7 +196,7 @@ public:
     }
 
     explicit operator const char *() const {
-      switch (this->value) {
+      switch (this->value_) {
         case METHOD::HEAD:
           return "HEAD";
         case METHOD::GET:
@@ -221,10 +221,10 @@ public:
     }
 
   protected:
-    METHOD value;
+    METHOD value_;
   };
 
-  explicit Request(Method method) : method_(method) {
+  explicit Request(Method method) : Message({1u, 1u}), method_(method) {
   }
 
   Request(Method method, ProtocolVersion protocol_version)
@@ -247,7 +247,7 @@ public:
     this->uri_ = move(uri);
   }
 
-  void clear() {
+  void clear() override {
     Message::clear();
     this->method_ = Method::METHOD::GET;
     this->uri_.clear();
@@ -306,7 +306,7 @@ public:
     this->attributes_.erase(name);
   }
 
-  void clear() {
+  void clear() override {
     Request::clear();
     this->state_ = STATE::INVALID;
     this->attributes_.clear();
@@ -394,15 +394,15 @@ public:
     };
 
     Status(const STATUS &status) {
-      this->value = status;
+      this->value_ = status;
     }
 
     operator int() const {
-      return this->value;
+      return this->value_;
     }
 
     explicit operator const char *() const {
-      switch (this->value) {
+      switch (this->value_) {
         case CONTINUE:
           return "Continue";
         case SWITCHING_PROTOCOLS:
@@ -539,19 +539,19 @@ public:
     }
 
   protected:
-    STATUS value;
+    STATUS value_;
   };
 
-  Response() : status_(Status::OK) {
+  Response() : Message({1u, 1u}), status_(Status::OK) {
     this->setStatus(this->status_);
   }
 
-  explicit Response(Status status) : status_(status) {
+  explicit Response(Status status) : Message({1u, 1u}), status_(move(status)) {
     this->setStatus(this->status_);
   }
 
-  Response(Status status, ProtocolVersion protocol_version) : Message(protocol_version),
-                                                              status_(status) {
+  Response(Status status, ProtocolVersion protocol_version) : Message(move(protocol_version)),
+                                                              status_(move(status)) {
     this->setStatus(this->status_);
   }
 
@@ -560,17 +560,22 @@ public:
   }
 
   void setStatus(Status status) {
-    this->status_ = status;
     this->reason_phrase_ = static_cast<const char *>(status);
+    this->status_ = move(status);
   }
 
   void setStatus(Status status, string &&reason_phrase) {
-    this->status_ = status;
+    this->status_ = move(status);
     this->reason_phrase_ = move(reason_phrase);
   }
 
   const string &getReasonPhrase() const {
     return this->reason_phrase_;
+  }
+
+  void clear() override {
+    Message::clear();
+    this->setStatus(Status::OK);
   }
 
 protected:

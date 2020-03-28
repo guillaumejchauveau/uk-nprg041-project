@@ -2,7 +2,15 @@
 #include "tcp.h"
 #include "sys/epoll.h"
 
-constexpr auto TCP_CLIENT_EVENTS = (EPOLLIN | EPOLLRDHUP | EPOLLET | EPOLLONESHOT);
+/**
+ * EPoll events:
+ * - EPOLLIN: The client is available for recv.
+ * - EPOLLRDHUP: The client shutdown at least its writing half of the connection, no more data will
+ *    be sent to the server.
+ * - EPOLLONESHOT: The client won't trigger any additional events unless manually re-armed. This
+ *    prevents "thundering herd" wake-ups if the server uses multiple threads.
+ */
+constexpr auto TCP_CLIENT_EVENTS = (EPOLLIN | EPOLLRDHUP | EPOLLONESHOT);
 
 namespace net {
 TCPServer::TCPServer(unique_ptr<Socket> &&socket) : socket_(move(socket)) {
@@ -44,9 +52,13 @@ void TCPServer::initialize(int max) {
   }
 }
 
+/**
+ * EPoll based, thread-safe TCP server. Waits for events on the server socket and connected clients
+ * sockets.
+ */
 void TCPServer::run() {
   if (!this->initialized_) {
-    throw utils::RuntimeException("Server already listening");
+    throw utils::RuntimeException("Server not initialized");
   }
   epoll_event event{}, ready[TCPServer::MAX_EVENT];
   int ready_count, event_fd;
@@ -67,6 +79,7 @@ void TCPServer::run() {
         }
         event.events = TCP_CLIENT_EVENTS;
         event.data.fd = client->getHandle();
+        // Adds the new client to the EPoll interest list.
         if (::epoll_ctl(this->epoll_fd_, EPOLL_CTL_ADD, client->getHandle(), &event) != 0) {
           throw utils::SystemException::fromLastError();
         }
