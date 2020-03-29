@@ -39,8 +39,7 @@ unique_ptr<Socket> Socket::accept(bool non_blocking_accepted) const {
     }
     throw utils::SystemException(error);
   }
-  auto socket_address = make_unique<SocketAddress>(client_sock_address,
-                                                   client_sock_address_len);
+  auto socket_address = SocketAddress(client_sock_address, client_sock_address_len);
   delete client_sock_address;
   auto client = make_unique<Socket>(client_socket, move(socket_address));
   if (non_blocking_accepted) {

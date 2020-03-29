@@ -21,7 +21,7 @@ public:
    * @param request The request to process
    * @return The response created
    */
-  virtual unique_ptr<Response> handle(ServerRequest &request) const = 0;
+  virtual unique_ptr<Response> handle(ServerRequest &request) = 0;
 };
 
 /**
@@ -38,7 +38,7 @@ public:
    * @return The response created
    */
   virtual unique_ptr<Response> process(ServerRequest &request,
-                                       const RequestHandler &handler) const = 0;
+                                       RequestHandler &handler) = 0;
 };
 
 typedef list<unique_ptr<Middleware>> application_middleware_t;

@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include "../utils/exception.h"
 
 using namespace std;
 
@@ -21,8 +22,56 @@ public:
   }
 
   static Uri fromString(const string &str) {
-    // TODO: Implement method stub.
-    return Uri();
+    Uri uri;
+    size_t previous = 0;
+    // Scheme.
+    auto end = str.find("://");
+    if (end != string::npos) {
+      uri.setScheme(Uri::decode(str.substr(0, end - previous)));
+      previous = end + 3;
+    }
+
+    // User info.
+    end = str.find('@', previous);
+    if (end != string::npos) {
+      uri.setUserInfo(Uri::decode(str.substr(previous, end - previous)));
+      previous = end + 1;
+    }
+
+    auto host_start = previous;
+
+    previous = str.size() - 1;
+    // Fragment.
+    auto start = str.rfind('#');
+    if (start != string::npos) {
+      uri.setFragment(Uri::decode(str.substr(start + 1, previous - start)));
+      previous = start - 1;
+    }
+
+    // Query.
+    start = str.rfind('?', previous);
+    if (start != string::npos) {
+      uri.setQuery(Uri::decode(str.substr(start + 1, previous - start)));
+      previous = start - 1;
+    }
+
+    // Path.
+    start = str.find('/', host_start);
+    if (start != string::npos) {
+      uri.setPath(utils::split(Uri::decode(str.substr(start + 1, previous - start)), '/'));
+      previous = start - 1;
+    }
+
+    // Port.
+    start = str.rfind(':', previous);
+    if (start != string::npos) {
+      uri.setPort(static_cast<unsigned>(::stoul(str.substr(start + 1, previous - start))));
+      previous = start - 1;
+    }
+
+    // Host.
+    uri.setHost(Uri::decode(str.substr(host_start, previous - host_start + 1)));
+    return uri;
   }
 
   const string &getScheme() const {
@@ -30,7 +79,7 @@ public:
   }
 
   void setScheme(string &&scheme) {
-    this->scheme_ = move(scheme_);
+    this->scheme_ = move(scheme);
   }
 
   const string &getUserInfo() const {
@@ -81,6 +130,53 @@ public:
     this->fragment_ = move(fragment);
   }
 
+  bool isValid() const {
+    if (!this->user_info_.empty() && this->host_.empty()) {
+      return false;
+    }
+    if (this->port_ != 0 && this->host_.empty()) {
+      return false;
+    }
+    return true;
+  }
+
+  operator string() const {
+    if (!this->isValid()) {
+      throw utils::RuntimeException("Uri is invalid");
+    }
+
+    string render;
+    if (!this->scheme_.empty()) {
+      render += Uri::encode(this->scheme_) + "://";
+    }
+    if (!this->user_info_.empty()) {
+      render += Uri::encode(this->user_info_) + '@';
+    }
+    if (!this->host_.empty()) {
+      render += Uri::encode(this->host_);
+    }
+    if (this->port_ != 0) {
+      render += ':';
+      render += to_string(this->port_);
+    }
+    for (const auto &segment : this->path_) {
+      render += '/';
+      render += Uri::encode(segment);
+    }
+    if (this->path_.empty()) {
+      render += '/';
+    }
+    if (!this->query_.empty()) {
+      render += '?';
+      render += Uri::encode(this->query_);
+    }
+    if (!this->fragment_.empty()) {
+      render += '#';
+      render += Uri::encode(this->fragment_);
+    }
+    return render;
+  }
+
   void clear() {
     this->scheme_.clear();
     this->user_info_.clear();
@@ -89,6 +185,14 @@ public:
     this->path_.clear();
     this->query_.clear();
     this->fragment_.clear();
+  }
+
+  static string encode(const string &str) {
+    return str;
+  }
+
+  static string decode(const string &str) {
+    return str;
   }
 };
 }

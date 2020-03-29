@@ -4,7 +4,6 @@
 #include "application.h"
 #include "messages.h"
 #include "../net/tcp.h"
-#include <iostream>
 #include <list>
 
 using namespace std;
@@ -33,9 +32,9 @@ protected:
     auto content = response->getBody().str();
     response->setHeader("Content-Length", to_string(content.length()));
 
-    auto head = static_cast<string>(response->getProtocolVersion());
+    string head = response->getProtocolVersion();
     head += " ";
-    head += to_string(static_cast<int>(response->getStatus()));
+    head += to_string(response->getStatus());
     head += " ";
     head += response->getReasonPhrase();
     head += "\r\n";
@@ -76,7 +75,7 @@ public:
     this->middleware_.push_back(move(middleware));
   }
 
-  unique_ptr<Response> handle(ServerRequest &request) const override {
+  unique_ptr<Response> handle(ServerRequest &request) override {
     auto &middleware_status = any_cast<MiddlewareStatus &>(
       request.getAttribute(MIDDLEWARE_STATUS_ATTRIBUTE));
     auto &current_middleware = middleware_status.current;
@@ -103,8 +102,8 @@ protected:
     size_t loaded_body_size_;
     bool response_sent_;
 
-    void resetRequestParsing() {
-      this->current_request_.clear();
+    void resetRequestParsing(bool preserveClientAddress = false) {
+      this->current_request_.clear(preserveClientAddress);
       this->server_.resetRequestMiddlewareStatus(this->current_request_);
       this->line_.clear();
       this->loaded_body_size_ = 0;
@@ -161,6 +160,7 @@ protected:
 
     unique_ptr<net::Socket> &&connected(unique_ptr<net::Socket> &&client) override {
       this->resetRequestParsing();
+      this->current_request_.client_address_ = static_cast<string>(client->getAddress());
       return move(client);
     }
 
@@ -251,7 +251,7 @@ protected:
 
       // Request is complete and must have been processed.
       if (this->current_request_.getState() == ServerRequest::STATE::BODY) {
-        this->resetRequestParsing();
+        this->resetRequestParsing(true);
       }
       return move(client);
     }

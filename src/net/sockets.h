@@ -168,7 +168,7 @@ struct SocketAddress {
 class Socket {
 protected:
   socket_handle_t handle_;
-  unique_ptr<SocketAddress> address_;
+  SocketAddress address_;
   int last_error_;
 
   /**
@@ -203,11 +203,10 @@ public:
    * @param address The address is moved to prevent modifications outside the wrapper
    * @throw invalid_argument Thrown if the socket handler could not be created
    */
-  Socket(unique_ptr<SocketAddress> &&address) : address_(
+  Socket(SocketAddress &&address) : address_(
     move(address)) {
     this->handle_ =
-      ::socket(this->address_->ai_family, this->address_->ai_socktype,
-               this->address_->ai_protocol);
+      ::socket(this->address_.ai_family, this->address_.ai_socktype, this->address_.ai_protocol);
     this->last_error_ = 0;
     if (this->isInvalid()) {
       this->last_error_ = -1;
@@ -221,7 +220,7 @@ public:
    * @param address The address is moved to prevent modifications outside the wrapper
    * @throw invalid_argument Thrown if the handler is invalid
    */
-  Socket(socket_handle_t handle, unique_ptr<SocketAddress> &&address) : address_(move(address)) {
+  Socket(socket_handle_t handle, SocketAddress &&address) : address_(move(address)) {
     this->handle_ = handle;
     this->last_error_ = 0;
     if (this->isInvalid()) {
@@ -267,7 +266,7 @@ public:
   /**
    * @return The address associated with the socket
    */
-  const unique_ptr<SocketAddress> &getAddress() const {
+  const SocketAddress &getAddress() const {
     return this->address_;
   }
 
@@ -367,8 +366,7 @@ public:
    */
   void bind() {
     this->checkState();
-    if ((::bind(this->handle_, &this->address_->ai_addr,
-                this->address_->ai_addrlen)) != 0) {
+    if ((::bind(this->handle_, &this->address_.ai_addr, this->address_.ai_addrlen)) != 0) {
       throw utils::SystemException::fromLastError();
     }
   }
@@ -380,8 +378,7 @@ public:
    */
   void connect() {
     this->checkState();
-    if ((::connect(this->handle_, &this->address_->ai_addr,
-                   this->address_->ai_addrlen)) != 0) {
+    if ((::connect(this->handle_, &this->address_.ai_addr, this->address_.ai_addrlen)) != 0) {
       auto error = utils::SystemException::getLastError();
       if (Socket::isErrorEInProgress(error)) {
         return;
@@ -538,9 +535,8 @@ public:
     unique_ptr<utils::SystemException> error;
     // Tries the addresses until one is bound successfully.
     for (auto addr = info; addr != nullptr; addr = addr->ai_next) {
-      auto address = make_unique<SocketAddress>(addr);
       try {
-        sock = make_unique<Socket>(move(address));
+        sock = make_unique<Socket>(SocketAddress(addr));
         if (reuse) {
           sock->setsockopt(SOL_SOCKET, SO_REUSEADDR, 1);
         }
@@ -585,9 +581,8 @@ public:
     unique_ptr<utils::SystemException> error;
     // Tries the addresses until one is connected successfully.
     for (auto addr = info; addr != nullptr; addr = addr->ai_next) {
-      auto address = make_unique<SocketAddress>(addr);
       try {
-        sock = make_unique<Socket>(move(address));
+        sock = make_unique<Socket>(SocketAddress(addr));
         sock->connect();
         if (non_blocking) {
           sock->setNonBlocking();

@@ -52,7 +52,7 @@ public:
       }
     }
     if (!this->reason_.empty()) {
-      return this->getReason().c_str();
+      return this->reason_.c_str();
     }
     return static_cast<const char *>(status_);
   }

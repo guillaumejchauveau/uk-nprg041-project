@@ -3,6 +3,7 @@
 
 #include "uri.h"
 #include "../utils/exception.h"
+#include "../net/sockets.h"
 #include <any>
 #include <map>
 #include <memory>
@@ -31,14 +32,6 @@ public:
     ProtocolVersion(unsigned major, unsigned minor) : major(major), minor(minor) {
     }
 
-    explicit operator string() const {
-      string version = "HTTP/";
-      version += to_string(this->major);
-      version += '.';
-      version += to_string(this->minor);
-      return version;
-    }
-
     static ProtocolVersion fromString(const string &str) {
       auto major_begin = str.find('/') + 1;
       auto major_end = str.find('.', major_begin);
@@ -46,7 +39,17 @@ public:
       auto minor = static_cast<unsigned>(stoul(str.substr(major_end + 1)));
       return ProtocolVersion(major, minor);
     }
+
+    operator string() const {
+      string version = "HTTP/";
+      version += to_string(this->major);
+      version += '.';
+      version += to_string(this->minor);
+      return version;
+    }
   };
+
+  virtual ~Message() = default;
 
   const ProtocolVersion &getProtocolVersion() const {
     return this->protocol_version_;
@@ -195,7 +198,7 @@ public:
       throw invalid_argument("Invalid input");
     }
 
-    explicit operator const char *() const {
+    operator const char *() const {
       switch (this->value_) {
         case METHOD::HEAD:
           return "HEAD";
@@ -218,6 +221,7 @@ public:
         case METHOD::CONNECT:
           return "CONNECT";
       }
+      throw runtime_error("Invalid value");
     }
 
   protected:
@@ -306,15 +310,30 @@ public:
     this->attributes_.erase(name);
   }
 
+  const string &getClientAddress() const {
+    return this->client_address_;
+  }
+
   void clear() override {
     Request::clear();
     this->state_ = STATE::INVALID;
     this->attributes_.clear();
+    this->client_address_.clear();
+  }
+
+  void clear(bool preserveClientAddress) {
+    Request::clear();
+    this->state_ = STATE::INVALID;
+    this->attributes_.clear();
+    if (!preserveClientAddress) {
+      this->client_address_.clear();
+    }
   }
 
 protected:
   STATE state_;
   map<string, any> attributes_;
+  string client_address_;
 };
 
 class Response : public Message {
@@ -401,7 +420,7 @@ public:
       return this->value_;
     }
 
-    explicit operator const char *() const {
+    operator const char *() const {
       switch (this->value_) {
         case CONTINUE:
           return "Continue";
@@ -560,7 +579,7 @@ public:
   }
 
   void setStatus(Status status) {
-    this->reason_phrase_ = static_cast<const char *>(status);
+    this->reason_phrase_ = string(status);
     this->status_ = move(status);
   }
 
