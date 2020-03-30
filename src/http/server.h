@@ -251,6 +251,9 @@ protected:
 
       // Request is complete and must have been processed.
       if (this->current_request_.getState() == ServerRequest::STATE::BODY) {
+        if (!this->current_request_.hasHeader("keep-alive")) {
+          client->close();
+        }
         this->resetRequestParsing(true);
       }
       return move(client);

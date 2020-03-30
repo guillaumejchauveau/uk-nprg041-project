@@ -68,7 +68,7 @@ public:
 int main() {
   net::SocketInitializer socket_initializer;
 
-  auto server = http::HTTPServer::with(AF_INET, nullptr, "8080");
+  auto server = http::HTTPServer::with(AF_INET, nullptr, "8080", true);
   server->addMiddleware(make_unique<ErrorHandler>());
   server->addMiddleware(make_unique<Logger>());
   server->addMiddleware(make_unique<Hello>());
